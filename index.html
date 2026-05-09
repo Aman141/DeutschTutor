@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DeutschCard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav class="navbar">
+    <span class="nav-logo" data-view="home">🇩🇪 DeutschCard</span>
+    <div class="nav-links">
+      <button class="nav-btn active" data-view="home">Home</button>
+      <button class="nav-btn" data-view="study">Study</button>
+      <button class="nav-btn" data-view="manage">Manage</button>
+      <button class="nav-btn" data-view="stats">Stats</button>
+    </div>
+  </nav>
+
+  <main id="app">
+
+    <!-- HOME VIEW -->
+    <section id="view-home" class="view active">
+      <div class="hero">
+        <h1>Lernen Sie Deutsch!</h1>
+        <p class="subtitle">Build your German vocabulary one card at a time.</p>
+        <div class="hero-stats">
+          <div class="stat-box">
+            <span id="stat-total">0</span>
+            <label>Total Words</label>
+          </div>
+          <div class="stat-box">
+            <span id="stat-known">0</span>
+            <label>Known</label>
+          </div>
+          <div class="stat-box">
+            <span id="stat-learning">0</span>
+            <label>Learning</label>
+          </div>
+        </div>
+        <div class="hero-actions">
+          <button class="btn btn-primary" data-view="study">Start Studying</button>
+          <button class="btn btn-secondary" data-view="manage">Manage Cards</button>
+        </div>
+        <div class="filter-row">
+          <label>Filter by tag:</label>
+          <select id="home-tag-filter">
+            <option value="all">All</option>
+          </select>
+          <label style="margin-left:1rem;">Level:</label>
+          <select id="home-level-filter">
+            <option value="all">All</option>
+            <option value="A1">A1</option>
+            <option value="A2">A2</option>
+            <option value="B1">B1</option>
+            <option value="B2">B2</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- STUDY VIEW -->
+    <section id="view-study" class="view">
+      <div class="study-header">
+        <div class="progress-info">
+          <span id="progress-text">Card 0 of 0</span>
+          <div class="progress-bar-wrap">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+        </div>
+        <div class="study-controls">
+          <button class="btn btn-sm" id="btn-shuffle">⇄ Shuffle</button>
+          <button class="btn btn-sm" id="btn-reset-session">↺ Reset</button>
+        </div>
+      </div>
+
+      <div class="card-area">
+        <div class="flashcard" id="flashcard">
+          <div class="card-inner">
+            <div class="card-front">
+              <span class="card-gender" id="card-gender"></span>
+              <h2 class="card-word" id="card-word">Click Start</h2>
+              <span class="card-tag" id="card-tag"></span>
+              <p class="card-hint">Click to reveal</p>
+            </div>
+            <div class="card-back">
+              <p class="card-translation" id="card-translation"></p>
+              <p class="card-plural" id="card-plural"></p>
+              <p class="card-example" id="card-example"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="study-actions" id="study-actions" style="visibility:hidden">
+        <button class="btn btn-danger" id="btn-still-learning">✗ Still Learning</button>
+        <button class="btn btn-success" id="btn-known">✓ Known</button>
+      </div>
+
+      <div class="session-summary hidden" id="session-summary">
+        <h2>Session Complete!</h2>
+        <p id="summary-text"></p>
+        <button class="btn btn-primary" id="btn-study-again">Study Again</button>
+        <button class="btn btn-secondary" data-view="home">Back to Home</button>
+      </div>
+    </section>
+
+    <!-- MANAGE VIEW -->
+    <section id="view-manage" class="view">
+      <div class="manage-header">
+        <h2>Manage Cards</h2>
+        <button class="btn btn-primary" id="btn-add-card">+ Add Word</button>
+      </div>
+
+      <div class="manage-filters">
+        <input type="text" id="search-input" placeholder="Search words…" />
+        <select id="manage-tag-filter">
+          <option value="all">All tags</option>
+        </select>
+      </div>
+
+      <div class="card-list" id="card-list"></div>
+
+      <!-- ADD/EDIT MODAL -->
+      <div class="modal-overlay hidden" id="modal-overlay">
+        <div class="modal">
+          <h3 id="modal-title">Add Word</h3>
+          <form id="card-form">
+            <input type="hidden" id="form-id" />
+            <div class="form-row">
+              <div class="form-group">
+                <label>German Word *</label>
+                <input type="text" id="form-german" placeholder="e.g. Hund" required />
+              </div>
+              <div class="form-group">
+                <label>Gender</label>
+                <select id="form-gender">
+                  <option value="">—</option>
+                  <option value="der">der (m)</option>
+                  <option value="die">die (f)</option>
+                  <option value="das">das (n)</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>English Translation *</label>
+                <input type="text" id="form-english" placeholder="e.g. dog" required />
+              </div>
+              <div class="form-group">
+                <label>Plural</label>
+                <input type="text" id="form-plural" placeholder="e.g. Hunde" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Example Sentence</label>
+              <input type="text" id="form-example" placeholder="e.g. Der Hund läuft schnell." />
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Tags (comma separated)</label>
+                <input type="text" id="form-tags" placeholder="e.g. animals, A1" />
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button type="button" class="btn btn-secondary" id="btn-cancel">Cancel</button>
+              <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATS VIEW -->
+    <section id="view-stats" class="view">
+      <h2>Your Progress</h2>
+      <div class="stats-grid" id="stats-grid"></div>
+    </section>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
