@@ -268,8 +268,14 @@ def priority(w):
 
 
 def cmd_hard(a):
+    """Only cards with real evidence of difficulty.
+
+    Deliberately excludes merely-unstudied cards: a fresh deck must return nothing,
+    so /drill refuses instead of building a drill out of vocabulary the learner has
+    never seen. Unstudied cards are `due`, not `hard`.
+    """
     words = [w for w in load() if not a.tag or a.tag in w["tags"]]
-    words = [w for w in words if w["mistakes"] or w["difficulty"] >= 2 or not w["known"]]
+    words = [w for w in words if w["mistakes"] or w["difficulty"] >= 2]
     words.sort(key=priority)
     show(words[: a.n], "Problemkarten")
 

@@ -95,6 +95,11 @@ queue by it, so words the user actually got wrong in conversation surface first.
   the browser and the vault meet.
 - Study order is deliberate, not incidental. `initStudy()` sorts by
   `mistakes → difficulty → unknown → least recently seen`. Shuffle is opt-in.
+- `deck.py hard` means *evidence of difficulty* — `mistakes > 0` or `difficulty >= 2`
+  — and deliberately excludes merely-unstudied cards. The vault's `/drill` refuses to
+  run when it returns nothing, so widening this predicate to include `not known`
+  would silently re-enable drills built from vocabulary the learner has never seen.
+  Unstudied cards belong to `due`.
 - After any mutation to `words`, call `saveWords(words)` then re-render the affected views.
 - CSS variables are defined on `:root` in `style.css`; use them for any new color or spacing additions.
 - Gender badge colors: `der` → `--accent-der` (blue), `die` → `--accent-die` (pink), `das` → `--accent-das` (purple). Apply the gender string as a CSS class to get the right color.

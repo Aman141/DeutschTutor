@@ -65,8 +65,8 @@ python3 deck.py add "Vertrag" --gender der --plural "Verträge" --en "contract" 
                    --example "Ich habe den Vertrag unterschrieben." --tags B1,arbeit
 python3 deck.py fail "Vertrag" --kind artikel --tag "#genus" --source L-012
 python3 deck.py pass "Vertrag"
-python3 deck.py hard -n 20        # problem cards, worst first
-python3 deck.py due --days 3      # not seen in 3+ days
+python3 deck.py hard -n 20        # problem cards only, worst first
+python3 deck.py due --days 3      # not seen in 3+ days (includes never-studied)
 python3 deck.py stats
 python3 deck.py sync-md           # rewrite the Markdown mirror
 python3 deck.py import-md         # pull in hand-written :: cards
