@@ -20,6 +20,11 @@ echo "  ─────────────────────"
 echo
 
 # ── 1. instantiate the state files ───────────────────────────────────────────
+# git does not track empty directories, and some of these hold only ignored
+# files, so they can be absent in a fresh clone.
+mkdir -p 00-State 01-Curriculum 02-Lektionen 03-Aufgaben 04-Prüfungen \
+         05-Vokabeln 06-Audio/Aufnahmen .claude
+
 created=0
 kept=0
 for f in profil fortschritt fehlerlog; do
