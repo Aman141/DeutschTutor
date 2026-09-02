@@ -75,7 +75,7 @@ python3 deck.py import-md         # pull in hand-written :: cards
 ## Project Structure
 
 ```
-07-Karten/
+07-DeutschCard/
 ├── index.html      # App shell and all views
 ├── style.css       # Styles and card flip animation
 ├── app.js          # All app logic (state, routing, storage)

@@ -11,7 +11,7 @@ read and write 05-Vokabeln/deck.json, which makes the link bidirectional:
 Study results therefore land in the vault, where Frau Ritter can read them, and
 vocabulary mistakes she logs with deck.py show up in the app on next load.
 
-    python3 07-Karten/serve.py [--port 8080] [--no-open]
+    python3 07-DeutschCard/serve.py [--port 8080] [--no-open]
 
 Stdlib only, no dependencies — same as the app itself.
 """

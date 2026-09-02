@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Context: this app lives inside a vault
 
-This directory is `07-Karten/` inside the Deutsch tutoring vault one level up. The
+This directory is `07-DeutschCard/` inside the Deutsch tutoring vault one level up. The
 vault's `../CLAUDE.md` defines the tutor persona; this file covers the app only.
 
 The important consequence: **the deck is no longer browser-local.** It lives at
@@ -15,7 +15,7 @@ whole point of the integration.
 ## Running the App
 
 ```bash
-python3 serve.py            # from anywhere: python3 07-Karten/serve.py
+python3 serve.py            # from anywhere: python3 07-DeutschCard/serve.py
 ```
 
 `serve.py` serves this directory and adds two endpoints:
