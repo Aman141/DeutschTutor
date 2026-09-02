@@ -67,7 +67,7 @@ else
   fi
 fi
 
-# ── 4. check the prerequisites, honestly ─────────────────────────────────────
+# ── 5. check the prerequisites, honestly ─────────────────────────────────────
 echo
 echo "  Voraussetzungen"
 echo "  ───────────────"
@@ -105,7 +105,7 @@ for pair in "sox:Aufnahme" "whisper-cli:Transkription"; do
     || echo "  · $bin fehlt — nur für den Aussprache-Loop nötig ($what)"
 done
 
-# ── 5. tell them what to do next ─────────────────────────────────────────────
+# ── 6. tell them what to do next ─────────────────────────────────────────────
 echo
 echo "  Nächste Schritte"
 echo "  ────────────────"
