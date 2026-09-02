@@ -2,20 +2,46 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Context: this app lives inside a vault
+
+This directory is `07-Karten/` inside the Deutsch tutoring vault one level up. The
+vault's `../CLAUDE.md` defines the tutor persona; this file covers the app only.
+
+The important consequence: **the deck is no longer browser-local.** It lives at
+`../05-Vokabeln/deck.json`, and both the app and the tutor's CLI (`deck.py`) read
+and write it. Changing the storage layer without preserving that link breaks the
+whole point of the integration.
+
 ## Running the App
 
-The app requires an HTTP server to load `data/seed.json` via `fetch`. Open a file directly and seed loading silently fails (the user must add words manually).
-
 ```bash
-python3 -m http.server 8080
-# then open http://localhost:8080
+python3 serve.py            # from anywhere: python3 07-Karten/serve.py
 ```
 
-There is no build step, no package manager, no transpilation.
+`serve.py` serves this directory and adds two endpoints:
+
+- `GET  /api/deck` — the deck from `../05-Vokabeln/deck.json`
+- `POST /api/deck` — persist the deck and regenerate the Markdown mirror
+
+Plain `python3 -m http.server 8080` still works, but then `/api/deck` 404s, the app
+falls back to `localStorage`, and nothing reaches the vault. The sync badge in the
+navbar shows `Offline` when that happens.
+
+There is no build step, no package manager, no transpilation. `serve.py` and
+`deck.py` are stdlib-only by design — the app has no dependencies and neither
+should its server.
 
 ## Architecture
 
 Single-page app in three files — no framework, no modules.
+
+**Storage is two-layered.** `loadFromVault()` fetches `/api/deck` on boot; if that
+succeeds, `vaultLive` is true and the vault's copy replaces whatever was in
+`localStorage` (the tutor may have logged mistakes since the last session, so the
+file wins). `saveWords()` always writes `localStorage` first — data is never lost if
+the server dies — then debounces a `POST` 400 ms later, so marking a run of cards
+produces one write, not twenty. When `vaultLive` is false the app behaves exactly as
+it did before this integration.
 
 **`app.js`** holds all state as module-level `let` variables:
 - `words` — master array, always in sync with `localStorage` via `saveWords()`
@@ -46,12 +72,29 @@ Single-page app in three files — no framework, no modules.
   known,     // boolean — toggled by study mode buttons
   difficulty,// 0–3 — incremented on "Still Learning", decremented on "Known"
   lastSeen,  // ISO date string 'YYYY-MM-DD' | null
+
+  // ── added by the vault integration; all optional, all safe to omit ──
+  forms,        // string — verb: 'zog um, ist umgezogen' (Präteritum, Partizip II)
+  prep,         // string — fixed preposition + case: 'über (+Akk)'
+  mistakes,     // number — times the tutor logged this word wrong in a lesson
+  mistakeKinds, // string[] — 'artikel' | 'plural' | 'bedeutung' | 'form' | …
+  fehlerTags,   // string[] — grammar tags from the vault's Fehlerlog, e.g. '#genus'
+  source,       // string — lesson that introduced it, e.g. 'L-012'
+  added,        // ISO date string
 }
 ```
 
+`mistakes` is what makes this more than a flashcard app: `initStudy()` sorts the
+queue by it, so words the user actually got wrong in conversation surface first.
+`deck.py fail <word>` is what sets it.
+
 ## Key Conventions
 
-- All persistence goes through `saveWords(words)` — never write to `localStorage` directly.
+- All persistence goes through `saveWords(words)` — never write to `localStorage`
+  directly, and never bypass it with your own `fetch`. It is the single point where
+  the browser and the vault meet.
+- Study order is deliberate, not incidental. `initStudy()` sorts by
+  `mistakes → difficulty → unknown → least recently seen`. Shuffle is opt-in.
 - After any mutation to `words`, call `saveWords(words)` then re-render the affected views.
 - CSS variables are defined on `:root` in `style.css`; use them for any new color or spacing additions.
 - Gender badge colors: `der` → `--accent-der` (blue), `die` → `--accent-die` (pink), `das` → `--accent-das` (purple). Apply the gender string as a CSS class to get the right color.

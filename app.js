@@ -1,5 +1,11 @@
-// ── Storage helpers ──────────────────────────────────────────────────────────
+// ── Storage ──────────────────────────────────────────────────────────────────
+// Two layers. The vault (05-Vokabeln/deck.json, via serve.py) is the source of
+// truth; localStorage is an offline cache so the app still works when opened as
+// a plain file. `vaultLive` records which one we are actually talking to.
 const STORAGE_KEY = 'deutschcard_words';
+const API = '/api/deck';
+let vaultLive = false;
+let pendingSave = null;
 
 function loadWords() {
   try {
@@ -7,8 +13,55 @@ function loadWords() {
   } catch { return []; }
 }
 
+// Pull the deck from the vault. Mistakes the tutor logged (deck.py fail) live
+// there, so on load the vault wins over the browser cache.
+async function loadFromVault() {
+  try {
+    const res = await fetch(API, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const deck = await res.json();
+    if (!Array.isArray(deck)) throw new Error('deck is not an array');
+    vaultLive = true;
+    words = deck;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(words));
+    setSyncState('live', words.length + ' Karten aus dem Vault');
+    return true;
+  } catch (e) {
+    vaultLive = false;
+    setSyncState('offline', 'nur im Browser gespeichert — serve.py läuft nicht');
+    return false;
+  }
+}
+
 function saveWords(words) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(words));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(words));   // never lose data
+  if (!vaultLive) return;
+  clearTimeout(pendingSave);              // coalesce bursts of card marking
+  setSyncState('saving', 'speichere …');
+  pendingSave = setTimeout(() => pushToVault(words), 400);
+}
+
+async function pushToVault(words) {
+  try {
+    const res = await fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(words),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.error || 'HTTP ' + res.status);
+    setSyncState('live', out.count + ' Karten im Vault');
+  } catch (e) {
+    setSyncState('error', 'Vault nicht erreichbar — ' + e.message);
+  }
+}
+
+function setSyncState(state, detail) {
+  const el = document.getElementById('sync-badge');
+  if (!el) return;
+  el.className = 'sync-badge ' + state;
+  el.textContent = { live: 'Vault', saving: 'Vault', offline: 'Offline', error: 'Fehler' }[state];
+  el.title = detail || '';
 }
 
 function generateId() {
@@ -26,7 +79,7 @@ let activeFilters = { tag: 'all', level: 'all' };
 
 // ── Seed data (load once) ────────────────────────────────────────────────────
 async function maybeSeed() {
-  if (words.length > 0) return;
+  if (vaultLive || words.length > 0) return;   // serve.py seeds the vault itself
   try {
     const res = await fetch('data/seed.json');
     const seed = await res.json();
@@ -41,6 +94,10 @@ async function maybeSeed() {
       known: false,
       difficulty: 0,
       lastSeen: null,
+      forms: w.forms || '',
+      prep: w.prep || '',
+      mistakes: 0,
+      mistakeKinds: [],
     }));
     saveWords(words);
     renderAll();
@@ -111,7 +168,14 @@ function initStudy() {
   document.getElementById('flashcard').classList.remove('hidden');
   document.getElementById('study-actions').style.visibility = 'hidden';
 
-  studyQueue = [...getFilteredWords()];
+  // Priority, not deck order: real mistakes from lessons first, then hard cards,
+  // then unknown, then least recently seen. deck.py fail() feeds this.
+  studyQueue = [...getFilteredWords()].sort((a, b) =>
+    (b.mistakes || 0) - (a.mistakes || 0) ||
+    (b.difficulty || 0) - (a.difficulty || 0) ||
+    (a.known ? 1 : 0) - (b.known ? 1 : 0) ||
+    String(a.lastSeen || '').localeCompare(String(b.lastSeen || ''))
+  );
   if (studyQueue.length === 0) {
     showCard({ german: 'No cards', english: 'Add some words first!', gender: '', tags: [], example: '' });
     return;
@@ -129,6 +193,23 @@ function showCard(word) {
   document.getElementById('card-word').textContent = word.german;
   document.getElementById('card-translation').textContent = word.english;
   document.getElementById('card-plural').textContent = word.plural ? `Plural: ${word.plural}` : '';
+
+  // Verb forms and fixed prepositions — the vault requires them on every verb.
+  document.getElementById('card-forms').textContent =
+    [word.forms, word.prep].filter(Boolean).join('  ·  ');
+
+  // Flag cards I have actually got wrong in a lesson, and say how.
+  const flag = document.getElementById('card-mistake');
+  const n = word.mistakes || 0;
+  if (n > 0) {
+    const kinds = (word.mistakeKinds || []).join(', ');
+    flag.textContent = `${n} ${n === 1 ? 'Fehler' : 'Fehler'} im Unterricht` +
+                       (kinds ? ': ' + kinds : '');
+    flag.classList.remove('hidden');
+  } else {
+    flag.textContent = '';
+    flag.classList.add('hidden');
+  }
   document.getElementById('card-example').textContent = word.example || '';
 
   const genderEl = document.getElementById('card-gender');
@@ -265,6 +346,8 @@ function openModal(wordId) {
     document.getElementById('form-plural').value = w.plural || '';
     document.getElementById('form-example').value = w.example || '';
     document.getElementById('form-tags').value = (w.tags || []).join(', ');
+    document.getElementById('form-forms').value = w.forms || '';
+    document.getElementById('form-prep').value = w.prep || '';
   } else {
     document.getElementById('modal-title').textContent = 'Add Word';
     document.getElementById('card-form').reset();
@@ -288,6 +371,8 @@ function saveCard(e) {
     english: document.getElementById('form-english').value.trim(),
     plural: document.getElementById('form-plural').value.trim(),
     example: document.getElementById('form-example').value.trim(),
+    forms: document.getElementById('form-forms').value.trim(),
+    prep: document.getElementById('form-prep').value.trim(),
     tags,
   };
 
@@ -295,7 +380,11 @@ function saveCard(e) {
     const idx = words.findIndex(w => w.id === id);
     if (idx !== -1) Object.assign(words[idx], data);
   } else {
-    words.push({ id: generateId(), known: false, difficulty: 0, lastSeen: null, ...data });
+    words.push({
+      id: generateId(), known: false, difficulty: 0, lastSeen: null,
+      mistakes: 0, mistakeKinds: [], fehlerTags: [], source: '',
+      added: new Date().toISOString().slice(0, 10), ...data,
+    });
   }
 
   saveWords(words);
@@ -358,7 +447,8 @@ function renderAll() {
 
 // ── Event wiring ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  await maybeSeed();
+  await loadFromVault();     // the vault wins if serve.py is running
+  await maybeSeed();         // otherwise fall back to the bundled seed
   renderAll();
 
   // Nav

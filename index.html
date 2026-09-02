@@ -16,6 +16,7 @@
       <button class="nav-btn" data-view="study">Study</button>
       <button class="nav-btn" data-view="manage">Manage</button>
       <button class="nav-btn" data-view="stats">Stats</button>
+      <span class="sync-badge offline" id="sync-badge" title="">Offline</span>
     </div>
   </nav>
 
@@ -88,7 +89,9 @@
             <div class="card-back">
               <p class="card-translation" id="card-translation"></p>
               <p class="card-plural" id="card-plural"></p>
+              <p class="card-forms" id="card-forms"></p>
               <p class="card-example" id="card-example"></p>
+              <p class="card-mistake hidden" id="card-mistake"></p>
             </div>
           </div>
         </div>
@@ -152,6 +155,16 @@
               <div class="form-group">
                 <label>Plural</label>
                 <input type="text" id="form-plural" placeholder="e.g. Hunde" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Verb Forms <span class="hint">Präteritum, Partizip II</span></label>
+                <input type="text" id="form-forms" placeholder="e.g. zog um, ist umgezogen" />
+              </div>
+              <div class="form-group">
+                <label>Preposition <span class="hint">+ Kasus</span></label>
+                <input type="text" id="form-prep" placeholder="e.g. über (+Akk)" />
               </div>
             </div>
             <div class="form-group">

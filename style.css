@@ -449,3 +449,49 @@ body {
   .hero-stats { gap: 0.75rem; }
   .stat-box { padding: 0.75rem 1rem; }
 }
+
+/* ── Vault sync (added when the app moved into the Deutsch vault) ─────────── */
+.sync-badge {
+  margin-left: 0.9rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: help;
+  border: 1px solid transparent;
+  transition: opacity 0.2s ease;
+}
+.sync-badge.live    { background: #1b4332; color: #74c69d; border-color: #2d6a4f; }
+.sync-badge.saving  { background: #1b4332; color: #74c69d; border-color: #2d6a4f; opacity: 0.55; }
+.sync-badge.offline { background: #343a40; color: #adb5bd; border-color: #495057; }
+.sync-badge.error   { background: #4a1520; color: #f8a5b5; border-color: #7d2438; }
+
+/* Verb forms / fixed preposition on the card back */
+.card-forms {
+  margin: 0.15rem 0 0;
+  font-size: 0.95rem;
+  font-style: italic;
+  color: var(--muted);
+}
+.card-forms:empty { display: none; }
+
+/* "You got this wrong in a lesson" — written by deck.py fail */
+.card-mistake {
+  margin-top: 0.9rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  background: rgba(220, 53, 69, 0.12);
+  border: 1px solid rgba(220, 53, 69, 0.35);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+/* Small grey hint inside a form label */
+.form-group label .hint {
+  font-weight: 400;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
