@@ -101,23 +101,15 @@ Then open a session, and open the folder in Obsidian too if you use it:
 claude
 ```
 
-First thing in the session, allowlist the tools so it stops asking permission on every
-audio call:
+`setup.sh` already wrote `.claude/settings.json`, so `say`, `ffmpeg`, `afplay` and the
+two Python scripts are allowlisted and it will not prompt on every audio call. Review
+them with `/permissions` if you want to see what you granted.
 
-```
-/permissions
-```
+> That file is deliberately **not** tracked by git — Claude Code appends approvals to
+> it as you work, and those can include absolute paths with your username. The repo
+> ships `.claude/settings.example.json` instead.
 
-Add these four:
-
-```
-Bash(say:*)
-Bash(ffmpeg:*)
-Bash(afplay:*)
-Bash(python3:*)
-```
-
-Then **read [CLAUDE.md](CLAUDE.md) yourself, properly.** It is loaded into every future
+First real task in the session: **read [CLAUDE.md](CLAUDE.md) yourself, properly.** It is loaded into every future
 session, so a bad rule there compounds forever. Check that it still contains: where
 state lives, the rule that every correction appends to `fehlerlog.md` with a tag, the
 rule to write lessons to files rather than only chatting, and the instruction to speak
