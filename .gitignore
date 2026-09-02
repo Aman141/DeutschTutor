@@ -57,9 +57,11 @@ Wortliste_*
 .obsidian/themes/
 
 # ── Claude Code local state ──────────────────────────────────────────────────
-# settings.json IS tracked: it ships the audio/python allowlist so a cloner
-# isn't prompted on every say/ffmpeg call. settings.local.json is per-machine
-# and accumulates one-off approvals with absolute paths — never publish it.
+# settings.json is NOT tracked. Claude Code appends approvals to it as you work,
+# including absolute paths containing your username — it drifts constantly and is
+# a standing leak risk in a public repo. settings.example.json ships instead, and
+# setup.sh installs it.
+.claude/settings.json
 **/.claude/settings.local.json
 **/.claude/history.jsonl
 .claude/*.local.json

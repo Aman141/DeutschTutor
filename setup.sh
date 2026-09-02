@@ -44,7 +44,17 @@ for f in 00-Einstufungstest 00-Einstufungstest-KEY; do
   fi
 done
 
-# ── 3. seed the vocabulary deck ──────────────────────────────────────────────
+# ── 3. Claude Code permissions ───────────────────────────────────────────────
+# Not tracked by git: Claude Code appends approvals to it as you work, including
+# absolute paths with your username. Installed from the example instead.
+if [ -e ".claude/settings.json" ]; then
+  echo "  behalten   .claude/settings.json (existiert schon)"
+else
+  cp ".claude/settings.example.json" ".claude/settings.json"
+  green "  erstellt   .claude/settings.json (say/ffmpeg/python3 erlaubt)"
+fi
+
+# ── 4. seed the vocabulary deck ──────────────────────────────────────────────
 if [ -e "05-Vokabeln/deck.json" ]; then
   echo "  behalten   05-Vokabeln/deck.json (existiert schon)"
 else
