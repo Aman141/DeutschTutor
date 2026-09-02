@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(say:*)",
+      "Bash(afplay:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(ffprobe:*)",
+      "Bash(python3 07-DeutschCard/deck.py:*)",
+      "Bash(python3 07-DeutschCard/serve.py:*)",
+      "Bash(git check-ignore *)"
+    ]
+  }
+}

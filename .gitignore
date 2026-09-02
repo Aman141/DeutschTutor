@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  This repo publishes the SYSTEM, never the LEARNER.
+#
+#  Everything a newcomer needs is tracked: the tutor rules, the commands, the
+#  curriculum, the flashcard app, and blank templates in templates/.
+#  Everything about one person's actual learning is ignored: their level, their
+#  goals, every mistake they have made, their exam answers, their voice.
+#
+#  Git cannot ignore a file it already tracks, which is why the state files are
+#  shipped as templates/ and copied into place by ./setup.sh.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Who I am and how I'm doing ───────────────────────────────────────────────
+# profil.md in particular can contain visa/residence status, employer, and
+# language background. It must never be published.
+00-State/profil.md
+00-State/fortschritt.md
+00-State/fehlerlog.md
+00-State/dashboard.md
+
+# ── Generated lessons ────────────────────────────────────────────────────────
+02-Lektionen/*
+!02-Lektionen/README.md
+
+# ── Assignments: the submission and its correction share the file ────────────
+03-Aufgaben/*
+!03-Aufgaben/README.md
+
+# ── Exams: contain my answers and my grades ──────────────────────────────────
+# Blank test + key live in templates/ instead.
+04-Prüfungen/*
+!04-Prüfungen/README.md
+
+# ── Vocabulary: deck.json carries my mistake history; *.md are generated ─────
+05-Vokabeln/*
+!05-Vokabeln/README.md
+
+# ── Audio: my own voice, plus large generated .wav files ─────────────────────
+06-Audio/*
+!06-Audio/README.md
+!06-Audio/Aufnahmen/
+06-Audio/Aufnahmen/*
+!06-Audio/Aufnahmen/README.md
+
+# ── Copyrighted exam material — never commit these ───────────────────────────
+# telc/Goethe mock tests and coursebooks are not ours to redistribute.
+*.pdf
+telc_*
+Wortliste_*
+
+# ── Obsidian: per-user workspace, not vault config ───────────────────────────
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/graph.json
+.obsidian/hotkeys.json
+.obsidian/plugins/
+.obsidian/themes/
+
+# ── Claude Code local state ──────────────────────────────────────────────────
+# settings.json IS tracked: it ships the audio/python allowlist so a cloner
+# isn't prompted on every say/ffmpeg call. settings.local.json is per-machine
+# and accumulates one-off approvals with absolute paths — never publish it.
+**/.claude/settings.local.json
+**/.claude/history.jsonl
+.claude/*.local.json
+
+# ── OS / tooling noise ───────────────────────────────────────────────────────
+.DS_Store
+._*
+__pycache__/
+*.pyc
+*.tmp
+*.bak
+scratchpad/
