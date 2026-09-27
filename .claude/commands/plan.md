@@ -25,7 +25,15 @@ Der Lehrplan ist ein Werkzeug, kein Vertrag. Passe ihn an die Wirklichkeit an.
   wird** und was das für die Prüfung bedeutet. Kürze niemals das Fundament.
 - **Fehlt ein Modul?** Wenn das Fehlerlog ein Thema zeigt, das im Plan nicht vorkommt,
   leg eine neue Moduldatei an: `01-Curriculum/MNN-Thema.md`, im Format von
-  [M07-Konjunktiv-II](../../01-Curriculum/M07-Konjunktiv-II.md).
+  [M07-Konjunktiv-II](../../01-Curriculum/M07-Konjunktiv-II.md). Das gilt **nur für
+  Module, die du gerade neu erfindest** — sie brauchen eine Begründung, die es sonst
+  nirgends gibt.
+
+  **Für alle anderen Module schreibst du keine Datei.** Der Plan legt Reihenfolge und
+  Umfang fest; den Sitzungsplan schreibt `/lesson`, wenn das Modul tatsächlich beginnt.
+  Grund: Eine Moduldatei ist nur so gut wie die Fehler, die sie zitiert. Fünfzehn
+  Dateien auf Vorrat wären auf die Diagnose von heute gebaut, würden aber in drei
+  Monaten befolgt — und sähen dabei verbindlich aus, obwohl sie raten.
 - **Ist ein Modul zu groß?** Teilen. Ein Modul, das nach 4 Sessions nicht fertig ist,
   war zwei Module.
 

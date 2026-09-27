@@ -443,8 +443,9 @@ your machine. The split is deliberate:
 | Tracked — the system | Ignored — your instance |
 |---|---|
 | `CLAUDE.md`, `.claude/commands/` | `00-State/profil.md` — level, goals, **residence status** |
-| `01-Curriculum/` — plan and modules | `00-State/fehlerlog.md` — every mistake you've made |
-| `07-DeutschCard/` — the flashcard app | `00-State/fortschritt.md` — your scores |
+| `templates/curriculum/` — neutral plan | `01-Curriculum/` — **your** plan, once `/plan` personalises it |
+| `07-DeutschCard/` — the flashcard app | `00-State/fehlerlog.md` — every mistake you've made |
+| `.claude/settings.example.json` | `00-State/fortschritt.md` — your scores |
 | `templates/` — blank state files | `02-Lektionen/`, `03-Aufgaben/` — lessons, submissions |
 | `README.md`, `setup.sh` | `04-Prüfungen/` — your exam answers and grades |
 | folder `README.md`s | `05-Vokabeln/` — deck carries your mistake history |

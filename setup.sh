@@ -49,7 +49,20 @@ for f in 00-Einstufungstest 00-Einstufungstest-KEY; do
   fi
 done
 
-# ── 3. Claude Code permissions ───────────────────────────────────────────────
+# ── 3. the curriculum ────────────────────────────────────────────────────────
+# Not tracked: once /plan runs it carries your placement score and quotes from
+# your error log. The neutral starting version lives in templates/curriculum/.
+for f in templates/curriculum/*.md; do
+  target="01-Curriculum/$(basename "$f")"
+  if [ -e "$target" ]; then
+    echo "  behalten   $target (existiert schon)"
+  else
+    cp "$f" "$target"
+    green "  erstellt   $target"
+  fi
+done
+
+# ── 4. Claude Code permissions ───────────────────────────────────────────────
 # Not tracked by git: Claude Code appends approvals to it as you work, including
 # absolute paths with your username. Installed from the example instead.
 if [ -e ".claude/settings.json" ]; then
@@ -59,7 +72,7 @@ else
   green "  erstellt   .claude/settings.json (say/ffmpeg/python3 erlaubt)"
 fi
 
-# ── 4. seed the vocabulary deck ──────────────────────────────────────────────
+# ── 5. seed the vocabulary deck ──────────────────────────────────────────────
 if [ -e "05-Vokabeln/deck.json" ]; then
   echo "  behalten   05-Vokabeln/deck.json (existiert schon)"
 else
@@ -72,7 +85,7 @@ else
   fi
 fi
 
-# ── 5. check the prerequisites, honestly ─────────────────────────────────────
+# ── 6. check the prerequisites, honestly ─────────────────────────────────────
 echo
 echo "  Voraussetzungen"
 echo "  ───────────────"
@@ -110,7 +123,7 @@ for pair in "sox:Aufnahme" "whisper-cli:Transkription"; do
     || echo "  · $bin fehlt — nur für den Aussprache-Loop nötig ($what)"
 done
 
-# ── 6. tell them what to do next ─────────────────────────────────────────────
+# ── 7. tell them what to do next ─────────────────────────────────────────────
 echo
 echo "  Nächste Schritte"
 echo "  ────────────────"

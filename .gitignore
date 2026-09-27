@@ -18,6 +18,14 @@
 00-State/fehlerlog.md
 00-State/dashboard.md
 
+# ── Curriculum: personal once /plan has run ──────────────────────────────────
+# plan.md gains your placement score, sub-scores and quotes from your error log;
+# module files cite your own mistakes with evidence — that is what makes them
+# useful, and also what makes them unpublishable. A neutral copy ships in
+# templates/curriculum/ and setup.sh installs it.
+01-Curriculum/*
+!01-Curriculum/README.md
+
 # ── Generated lessons ────────────────────────────────────────────────────────
 02-Lektionen/*
 !02-Lektionen/README.md
