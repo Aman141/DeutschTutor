@@ -2,8 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#2d6a4f" />
   <title>DeutschCard</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="icons/favicon-32.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -16,8 +19,8 @@
       <button class="nav-btn" data-view="study">Study</button>
       <button class="nav-btn" data-view="manage">Manage</button>
       <button class="nav-btn" data-view="stats">Stats</button>
-      <span class="sync-badge offline" id="sync-badge" title="">Offline</span>
     </div>
+    <span class="sync-badge offline" id="sync-badge" title="">Offline</span>
   </nav>
 
   <main id="app">
@@ -83,8 +86,9 @@
             <div class="card-front">
               <span class="card-gender" id="card-gender"></span>
               <h2 class="card-word" id="card-word">Click Start</h2>
+              <button type="button" class="card-speak hidden" id="btn-speak" aria-label="Aussprache anhören" title="Anhören">&#128264;</button>
               <span class="card-tag" id="card-tag"></span>
-              <p class="card-hint">Click to reveal</p>
+              <p class="card-hint">Tap to reveal</p>
             </div>
             <div class="card-back">
               <p class="card-translation" id="card-translation"></p>
@@ -92,6 +96,7 @@
               <p class="card-forms" id="card-forms"></p>
               <p class="card-example" id="card-example"></p>
               <p class="card-mistake hidden" id="card-mistake"></p>
+              <p class="card-swipe-hint">&larr; still learning &middot; known &rarr;</p>
             </div>
           </div>
         </div>

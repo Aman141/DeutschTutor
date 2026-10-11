@@ -44,6 +44,10 @@ python3 07-DeutschCard/deck.py sync             # uploads the deck
 python3 07-DeutschCard/deck.py device add phone # prints the phone's setup link
 ```
 
+On Android, open the app in Chrome and use **⋮ → Install app** (or the install
+banner): it gets its own icon, opens full-screen and works offline. Changes made
+offline sync when the network is back.
+
 `bootstrap.py` creates the Mac as the admin device and saves its token in
 `05-Vokabeln/sync.json` (gitignored, mode 600). Open the setup link on the phone
 once. The token is in the part after `#`, which browsers never send to a server.

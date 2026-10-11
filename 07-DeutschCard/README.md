@@ -20,8 +20,11 @@ priority cards, and progress made here is visible to the tutor. See
 - **Verb forms & prepositions** — Präteritum/Partizip II and fixed case on the card
 - **Vault sync** — the deck is a real file on disk, not just browser storage
 - **Offline-safe merging** — changes are an append-only op log, so the app, the
-  tutor's CLI and (soon) the phone can each work offline and merge without
-  overwriting each other
+  tutor's CLI and the phone can each work offline and merge without overwriting
+  each other
+- **Installable on Android** — "Install app" in Chrome; opens offline, bottom tab
+  bar, swipe right = Known / left = Still Learning, 🔈 reads the word aloud
+- **Cloud relay** — sync while the Mac is off, see [cloud/README.md](cloud/README.md)
 
 ## Getting Started
 
@@ -92,6 +95,10 @@ python3 deck.py import-md         # pull in hand-written :: cards
 ├── style.css       # Styles and card flip animation
 ├── app.js          # All app logic (state, routing, op log + sync)
 ├── ops.js          # Op replay — must match replay() in deck.py
+├── sw.js           # Service worker: opens offline (network-first app shell)
+├── manifest.webmanifest  # makes Chrome offer "Install app"
+├── icons/          # app icons + make_icons.py (stdlib) that draws them
+├── cloud/          # Cloudflare relay: worker, schema, setup
 ├── serve.py        # Static server + /api/ops sync endpoints
 ├── deck.py         # Tutor-facing CLI over the op log
 ├── tests/          # Python + Node tests pinning both replays to fixtures/

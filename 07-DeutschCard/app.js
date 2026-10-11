@@ -357,6 +357,7 @@ function showCard(word) {
     flag.classList.add('hidden');
   }
   document.getElementById('card-example').textContent = word.example || '';
+  document.getElementById('btn-speak').classList.toggle('hidden', !canSpeak || !word.id);
 
   const genderEl = document.getElementById('card-gender');
   if (word.gender) {
@@ -382,6 +383,83 @@ function flipCard() {
   if (isFlipped) {
     document.getElementById('study-actions').style.visibility = 'visible';
   }
+}
+
+// ── Swipe & speech (phone) ───────────────────────────────────────────────────
+// On a flipped card, drag right = Known, left = Still Learning, the same as the
+// buttons. On the front a drag does nothing and a tap still flips. Mouse input is
+// ignored: on a desktop the buttons are the interface.
+const SWIPE_COMMIT = 90;    // px of horizontal travel that counts as an answer
+let swipe = null;           // { x, y, dx, active } while a finger is down
+let suppressClick = false;  // the click a browser fires after a drag is not a tap
+
+function initSwipe() {
+  const card = document.getElementById('flashcard');
+  const clear = () => {
+    card.style.transform = '';
+    card.classList.remove('swipe-known', 'swipe-learning');
+    swipe = null;
+  };
+  card.addEventListener('pointerdown', e => {
+    suppressClick = false;
+    if (e.pointerType === 'mouse' || e.target.closest('.card-speak')) return;
+    swipe = { x: e.clientX, y: e.clientY, dx: 0, active: false };
+  });
+  card.addEventListener('pointermove', e => {
+    if (!swipe) return;
+    swipe.dx = e.clientX - swipe.x;
+    const dy = e.clientY - swipe.y;
+    if (!swipe.active) {
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(swipe.dx)) { swipe = null; return; }  // a scroll
+      if (Math.abs(swipe.dx) < 12) return;
+      swipe.active = true;
+      card.classList.remove('settle');
+      try { card.setPointerCapture(e.pointerId); } catch {}
+    }
+    if (!isFlipped) return;
+    card.style.transform = `translateX(${swipe.dx}px) rotate(${swipe.dx / 25}deg)`;
+    card.classList.toggle('swipe-known', swipe.dx > SWIPE_COMMIT);
+    card.classList.toggle('swipe-learning', swipe.dx < -SWIPE_COMMIT);
+  });
+  card.addEventListener('pointerup', () => {
+    if (!swipe) return;
+    const { active, dx } = swipe;
+    if (active) suppressClick = true;
+    card.classList.add('settle');
+    if (active && isFlipped && Math.abs(dx) > SWIPE_COMMIT) {
+      card.style.transform = `translateX(${dx > 0 ? '' : '-'}110vw) rotate(${dx > 0 ? 12 : -12}deg)`;
+      swipe = null;
+      setTimeout(() => {                    // after the fly-out, answer and come back
+        card.classList.remove('settle');
+        clear();
+        markCard(dx > 0);
+      }, 200);
+      return;
+    }
+    clear();                                // not far enough: spring back
+  });
+  card.addEventListener('pointercancel', () => { card.classList.add('settle'); clear(); });
+  card.addEventListener('click', () => {
+    if (suppressClick) { suppressClick = false; return; }
+    flipCard();
+  });
+}
+
+const canSpeak = 'speechSynthesis' in window;
+
+// The phone's own German voice (Android ships de-DE). Article included: the
+// gender is the part worth hearing.
+function speakCard(e) {
+  e.stopPropagation();                      // not a tap on the card
+  const w = studyQueue[studyIndex];
+  if (!w || !canSpeak) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance([w.gender, w.german].filter(Boolean).join(' '));
+  u.lang = 'de-DE';
+  u.rate = 0.9;
+  const voice = speechSynthesis.getVoices().find(v => /^de[-_]/i.test(v.lang));
+  if (voice) u.voice = voice;
+  speechSynthesis.speak(u);
 }
 
 function markCard(known) {
@@ -602,6 +680,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderAll();
   updateSyncBadge();
 
+  // Installed app: open offline (sw.js), and ask Chrome not to evict the deck
+  // under storage pressure — IndexedDB holds changes not yet synced.
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('sw.js').catch(e => console.error('Service worker', e));
+  }
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
   // Nav
   document.querySelectorAll('[data-view]').forEach(el => {
     el.addEventListener('click', () => showView(el.dataset.view));
@@ -618,7 +703,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Study
-  document.getElementById('flashcard').addEventListener('click', flipCard);
+  initSwipe();                // also handles the tap that flips
+  document.getElementById('btn-speak').addEventListener('click', speakCard);
   document.getElementById('btn-known').addEventListener('click', () => markCard(true));
   document.getElementById('btn-still-learning').addEventListener('click', () => markCard(false));
   document.getElementById('btn-shuffle').addEventListener('click', () => {

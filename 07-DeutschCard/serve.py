@@ -40,6 +40,9 @@ WRITE_LOCK = threading.Lock()
 
 
 class Handler(SimpleHTTPRequestHandler):
+    extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
+                      ".webmanifest": "application/manifest+json"}
+
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=APP_DIR, **kw)
 
@@ -105,7 +108,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def end_headers(self):
-        if self.path.endswith((".js", ".css", ".html", "/")):
+        if self.path.endswith((".js", ".css", ".html", ".webmanifest", "/")):
             self.send_header("Cache-Control", "no-cache")
         super().end_headers()
 

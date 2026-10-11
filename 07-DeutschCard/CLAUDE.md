@@ -46,7 +46,14 @@ node --test tests/test_ops.js
 ## Architecture
 
 Single-page app, no framework, no modules: `index.html`, `style.css`, `ops.js`
-(replay, loaded first) and `app.js`.
+(replay, loaded first) and `app.js`. `manifest.webmanifest`, `icons/` and `sw.js`
+make it an installable Android app.
+
+**Offline start.** `sw.js` caches the app shell and serves it network-first with a
+2.5 s timeout: online you always get the latest deploy, offline the last cached
+copy. It never touches `/api/` — the data side is IndexedDB plus the outbox. Add a
+file to the shell → add it to `SHELL` and bump `CACHE`; editing existing files
+needs nothing.
 
 **The deck is computed, never stored or sent whole.** Every change is an op —
 `add`, `edit`, `delete`, `review`, `fail` — with a unique `id`, an `at` timestamp
@@ -77,6 +84,12 @@ device can overwrite another's changes — the bug the old whole-deck `POST` had
 **Rendering** is direct DOM manipulation (no virtual DOM). Each view has a dedicated render function (`renderHome`, `renderManage`, `renderStats`). HTML for list items is built via template literals and set via `innerHTML`. Event delegation is used for the card list (edit/delete buttons).
 
 **Tags vs Levels** — tags array on each word mixes content tags (`animals`, `food`) and CEFR levels (`A1`–`B2`). `populateTagFilter()` strips out level tags so they don't appear in the content tag dropdown. The home view has two separate `<select>` elements that filter independently via `activeFilters.tag` and `activeFilters.level`.
+
+**Swipe** (`initSwipe`) handles touch only: on a flipped card a drag past
+`SWIPE_COMMIT` px calls `markCard()`, exactly like the buttons; on the front a drag
+does nothing. It also owns the card's click handler, because the click a browser
+fires after a drag must not flip the card (`suppressClick`). The flashcard has
+`touch-action: pan-y` so vertical scrolling still works.
 
 **The card flip** is pure CSS (`rotateY(180deg)` on `.card-inner` when `.flashcard.flipped` is present). The answer buttons are hidden via `visibility:hidden` (not `display:none`) until the card is flipped, so layout doesn't shift.
 
