@@ -2,7 +2,7 @@
 """deck.py — the bridge between the Deutsch vault and the DeutschCard app.
 
 Source of truth is 05-Vokabeln/ops.jsonl: an append-only log of changes ("ops")
-from every device — this CLI, the browser, later the phone. Replaying the log in
+from every device — this CLI, the browser, the phone. Replaying the log in
 (at, id) order gives the deck; the same replay runs in the app (ops.js), so every
 device that holds the same ops computes the same deck. Ops are never edited, only
 appended, which is what makes offline devices safe to merge.
@@ -18,6 +18,7 @@ Usage:
   deck.py hard [-n 20] [--tag arbeit]
   deck.py due  [-n 20] [--days 3]
   deck.py stats
+  deck.py activity [--days 7]   # app study time per day and device, from the log
   deck.py sync-md            # rebuild deck.json + Markdown from the log
   deck.py sync [--url URL --token TOKEN]   # exchange ops with the Cloudflare relay
   deck.py device add phone   # setup link for a new device (list, revoke NAME)
@@ -470,6 +471,62 @@ def cmd_stats(a):
         print(f"  {t:<16} {k}/{n}")
 
 
+SESSION_GAP = timedelta(minutes=10)    # a longer pause starts a new study session
+PER_CARD = timedelta(seconds=15)       # credit for the last card of a session
+
+
+def parse_at(at):
+    return datetime.fromisoformat(at.replace("Z", "+00:00"))
+
+
+def cmd_activity(a):
+    """App study time from the log: who reviewed what, when, roughly how long.
+
+    Minutes are an estimate: reviews closer than SESSION_GAP form one session,
+    which lasts from its first to its last review plus PER_CARD.
+    """
+    load()
+    since = (date.today() - timedelta(days=a.days - 1)).isoformat()
+    days = {}                                     # (date, device) -> stats
+    fails = 0
+    for o in read_ops():
+        if not valid_op(o) or o["op"] not in ("review", "fail"):
+            continue
+        day = o.get("date") or o["at"][:10]
+        if day < since:
+            continue
+        if o["op"] == "fail":
+            fails += 1
+            continue
+        d = days.setdefault((day, o.get("device", "?")), {"ats": [], "cards": set(), "known": 0})
+        d["ats"].append(parse_at(o["at"]))
+        d["cards"].add(o["card"])
+        d["known"] += 1 if o.get("known") else 0
+    if not days:
+        print(f"Keine App-Wiederholungen in den letzten {a.days} Tagen.")
+        return
+    print(f"App-Aktivität — letzte {a.days} Tage\n")
+    print(f"  {'Datum':<11} {'Gerät':<10} {'Wdh.':>5} {'gewusst':>8} {'nicht':>6} {'≈ Min':>6}")
+    total_n = total_min = 0
+    all_cards = set()
+    for (day, device), d in sorted(days.items()):
+        ats = sorted(d["ats"])
+        minutes, start = 0.0, ats[0]
+        for prev, cur in zip(ats, ats[1:] + [None]):
+            if cur is None or cur - prev > SESSION_GAP:
+                minutes += (prev - start + PER_CARD).total_seconds() / 60
+                start = cur
+        n = len(ats)
+        total_n += n
+        total_min += minutes
+        all_cards |= d["cards"]
+        print(f"  {day:<11} {device:<10} {n:>5} {d['known']:>8} {n - d['known']:>6} {round(minutes):>6}")
+    print(f"\nSumme: {total_n} Wiederholungen · {len(all_cards)} verschiedene Karten · "
+          f"≈ {round(total_min)} Min")
+    if fails:
+        print(f"Im Unterricht protokollierte Fehler (deck.py fail): {fails}")
+
+
 def cmd_sync_md(a):
     words = load()
     save(words, sync_md=False)
@@ -671,6 +728,10 @@ def main():
     ):
         s = sub.add_parser(name, help=helptext)
         s.set_defaults(func=fn)
+
+    t = sub.add_parser("activity", help="App-Lernzeit pro Tag und Gerät")
+    t.add_argument("--days", type=int, default=7)
+    t.set_defaults(func=cmd_activity)
 
     y = sub.add_parser("sync", help="mit dem Cloudflare-Relay abgleichen")
     y.add_argument("--url", help="Relay-Adresse, z.B. https://deutschcard.NAME.workers.dev")

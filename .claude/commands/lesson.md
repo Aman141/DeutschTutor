@@ -116,7 +116,7 @@ python3 07-DeutschCard/deck.py add "Vertrag" --gender der --plural "Verträge" \
 **d) [00-State/fehlerlog.md](../../00-State/fehlerlog.md)** — jeder Fehler von heute,
 mit Tag und Quelle `L-NNN`. Bei Wortschatzfehlern **zusätzlich**
 `python3 07-DeutschCard/deck.py fail "<Wort>" --kind <art> --source L-NNN`, damit das
-Wort beim nächsten `/karten` in der App vorn steht.
+Wort in der App vorn steht — mit Relay sofort auch auf dem Handy.
 
 **e) [00-State/fortschritt.md](../../00-State/fortschritt.md)** — Session-Log-Zeile,
 Stunden, Modulstatus, „Letzte Session".

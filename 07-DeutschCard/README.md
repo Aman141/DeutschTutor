@@ -83,7 +83,10 @@ python3 deck.py pass "Vertrag"
 python3 deck.py hard -n 20        # problem cards only, worst first
 python3 deck.py due --days 3      # not seen in 3+ days (includes never-studied)
 python3 deck.py stats
-python3 deck.py sync-md           # rewrite the Markdown mirror
+python3 deck.py activity --days 7 # app study time per day and device
+python3 deck.py sync              # exchange ops with the Cloudflare relay
+python3 deck.py device add phone  # setup link for a new device (list, revoke)
+python3 deck.py sync-md           # rewrite deck.json + the Markdown mirror
 python3 deck.py import-md         # pull in hand-written :: cards
 ```
 

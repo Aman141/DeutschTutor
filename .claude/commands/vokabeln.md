@@ -21,6 +21,11 @@ python3 07-DeutschCard/deck.py hard -n 20     # Problemkarten, echte Fehler zuer
 python3 07-DeutschCard/deck.py due --days 3   # lange nicht gesehen
 ```
 
+> **Handy-Stand inklusive.** Ist das Cloud-Relay eingerichtet, holt jeder
+> `deck.py`-Aufruf vorher automatisch, was ich auf dem Handy gelernt habe. Steht in
+> der Ausgabe `(Sync vorher übersprungen: …)`, dann sag mir, dass der Stand vom
+> Handy fehlen kann — und arbeite trotzdem weiter.
+
 Nimm 20 Karten: erst alles aus `hard`, den Rest aus `due`. Frag **nicht** nur
 „Wort → Bedeutung", sondern rotiere die Form — und zwar gezielt die Form, in der
 ich die Karte falsch hatte (`mistakeKinds` steht in der Ausgabe von `hard`):

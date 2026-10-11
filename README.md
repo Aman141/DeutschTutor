@@ -263,6 +263,10 @@ can overwrite the other's changes, even when the app was offline for a while:
                     05-Vokabeln/*.md       (generated mirror, for Obsidian)
 ```
 
+With the optional Cloudflare relay ([07-DeutschCard/cloud/](07-DeutschCard/cloud/)) the
+same loop reaches an installable Android app that syncs while your Mac is off, and
+`deck.py` pulls the phone's progress before every command.
+
 So it closes in both directions:
 
 - You get *der Vertrag* wrong in conversation → the tutor runs

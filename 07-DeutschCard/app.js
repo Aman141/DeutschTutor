@@ -26,6 +26,7 @@ let syncing = false;
 let syncAgain = false;      // a change arrived mid-sync; run once more after it
 let syncTimer = null;
 let serverReachable = false;
+let needsSetup = false;     // the relay refused our token (or we have none)
 
 function idbRequest(req) {
   return new Promise((resolve, reject) => {
@@ -81,7 +82,7 @@ async function openStore() {
 // the server. Store it, then strip it from the address bar and history.
 function readSetupLink() {
   const params = new URLSearchParams(location.hash.slice(1));
-  if (!params.get('token')) return;
+  if (!params.get('token')) return false;
   token = params.get('token');
   idbWrite('meta', s => s.put(token, 'token'));
   if (params.get('device')) {
@@ -89,6 +90,7 @@ function readSetupLink() {
     idbWrite('meta', s => s.put(device, 'device'));
   }
   history.replaceState(null, '', location.pathname + location.search);
+  return true;
 }
 
 function apiHeaders(extra = {}) {
@@ -162,7 +164,7 @@ async function sync() {
         body: JSON.stringify({ ops: chunk }),
       });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(out.error || 'HTTP ' + res.status);
+      if (!res.ok) throw httpError(res, out);
       chunk.forEach(o => outbox.delete(o.id));
       idbWrite('outbox', s => chunk.forEach(o => s.delete(o.id)));
     }
@@ -172,22 +174,42 @@ async function sync() {
     while (more) {
       const res = await fetch(`${API}?since=${cursor}`, { cache: 'no-store', headers: apiHeaders() });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(out.error || 'HTTP ' + res.status);
+      if (!res.ok) throw httpError(res, out);
       changed += receive(out.ops || []);
       cursor = out.seq;
       more = !!out.more;
       idbWrite('meta', s => s.put(cursor, 'cursor'));
     }
     serverReachable = true;
+    needsSetup = false;
   } catch (e) {
     serverReachable = false;
     error = e instanceof TypeError ? null : e.message;   // TypeError = no server at all
+    needsSetup = e.status === 401;
   } finally {
     syncing = false;
   }
   updateSyncBadge(error);
+  updateSetupBanner();
   if (changed) refreshViews();
   if (syncAgain && serverReachable) { syncAgain = false; sync(); }
+}
+
+function httpError(res, out) {
+  const e = new Error(out.error || 'HTTP ' + res.status);
+  e.status = res.status;
+  return e;
+}
+
+// The relay answered 401: this browser has no token (never opened a setup link)
+// or its device was revoked. Say so plainly instead of showing an empty deck.
+function updateSetupBanner() {
+  const el = document.getElementById('setup-banner');
+  if (!el) return;
+  el.classList.toggle('hidden', !needsSetup);
+  const n = outbox.size;
+  document.getElementById('setup-pending').textContent = n
+    ? ` ${n} Änderung(en) von diesem Gerät warten und werden danach gesendet.` : '';
 }
 
 function updateSyncBadge(error) {
@@ -746,6 +768,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Sync: now, whenever the page comes back into view or the network returns,
   // and once a minute while visible (picks up deck.py fail during a lesson).
   window.addEventListener('online', () => sync());
+  // A setup link pasted into an already open tab changes only the fragment:
+  // no reload, so read it here too.
+  window.addEventListener('hashchange', () => { if (readSetupLink()) sync(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });
   setInterval(() => { if (!document.hidden) sync(); }, 60000);
   await sync();

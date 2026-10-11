@@ -16,6 +16,11 @@ Problemkarten aus dem Deck:
 python3 07-DeutschCard/deck.py hard -n 20
 ```
 
+> **Handy-Stand inklusive.** Ist das Cloud-Relay eingerichtet, holt jeder
+> `deck.py`-Aufruf vorher automatisch, was ich auf dem Handy gelernt habe. Steht in
+> der Ausgabe `(Sync vorher übersprungen: …)`, dann sag mir, dass der Stand vom
+> Handy fehlen kann — und arbeite trotzdem weiter.
+
 **Wenn beide leer sind, brich ab.** Erfinde keine allgemeinen Übungen. Sag genau das:
 
 > Dein Fehlerlog ist leer und im Deck stehen keine Problemkarten. Ein Drill zieht

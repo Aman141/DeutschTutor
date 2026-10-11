@@ -546,3 +546,18 @@ body {
   .study-actions { gap: 0.75rem; }
   .study-actions .btn { flex: 1; min-width: 0; padding: 1rem 0.5rem; }
 }
+
+/* Shown when the relay refuses this device (no token yet, or revoked) */
+.setup-banner {
+  max-width: 860px;
+  margin: 1rem auto 0;
+  padding: 0.9rem 1.1rem;
+  background: #fff4d6;
+  border: 1px solid #f0d58a;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.setup-banner code { background: rgba(0,0,0,0.06); padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.85em; word-break: break-all; }
+@media (max-width: 640px) { .setup-banner { margin: 0.75rem 1rem 0; } }

@@ -13,7 +13,13 @@ Der ehrliche Blick zurück. Lies **alle** State-Dateien, die letzten 5 Dateien i
 ## Bericht
 
 **1 · Zahlen.** Stunden diese Woche vs. Ziel aus [profil.md](../../00-State/profil.md).
-Sessions. Neue Fehler vs. archivierte Fehler — die Richtung dieser Differenz *ist* der
+Sessions. Die Lernzeit in der App (Handy, Browser) steht nicht in
+[fortschritt.md](../../00-State/fortschritt.md), sondern im Deck-Log — rechne sie dazu:
+
+```bash
+python3 07-DeutschCard/deck.py activity --days 7     # bei "monat": --days 30
+```
+ Neue Fehler vs. archivierte Fehler — die Richtung dieser Differenz *ist* der
 Fortschritt. Neue Karten, fällige Karten.
 
 **2 · Was jetzt sitzt.** Konkret, mit Beweis: „Nebensätze — 5/5 im Drill am Mittwoch

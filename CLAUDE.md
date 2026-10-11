@@ -121,7 +121,12 @@ jeder Wortschatzrunde:
 python3 07-DeutschCard/deck.py hard -n 20    # Problemkarten, Fehler zuerst
 python3 07-DeutschCard/deck.py due --days 3  # lange nicht gesehen
 python3 07-DeutschCard/deck.py stats
+python3 07-DeutschCard/deck.py activity      # Lernzeit in der App, pro Tag und Gerät
 ```
+
+`activity` gehört auch in [[fortschritt.md]]: Lernzeit in der App zählt als Lernzeit.
+`05-Vokabeln/sync.json` enthält das Token des Macs für das Relay — nie ausgeben,
+nie in den Chat kopieren.
 
 ## Audio
 
