@@ -80,10 +80,12 @@ Nummer, bevor du eine neue Datei anlegst.
 
 ## Vokabeln: das Deck ist die Wahrheit
 
-Vokabeln liegen in **[05-Vokabeln/deck.json](05-Vokabeln/deck.json)** — dieselbe
-Datei, aus der die Flashcard-App in [07-DeutschCard/](07-DeutschCard/) liest und schreibt.
-Die `.md`-Dateien in `05-Vokabeln/` sind ein **generierter Spiegel** zum Lesen und
-Suchen in Obsidian; schreib nie direkt hinein, sie werden überschrieben.
+Das Deck ist ein Änderungsprotokoll, `05-Vokabeln/ops.jsonl`: jede Änderung (von dir
+per `deck.py`, von mir in der App in [07-DeutschCard/](07-DeutschCard/)) wird dort
+angehängt, nie überschrieben. Daraus erzeugt: **[05-Vokabeln/deck.json](05-Vokabeln/deck.json)**
+(lesen erlaubt, jederzeit aktuell) und die `.md`-Dateien als Spiegel für Obsidian.
+**Schreib in keine dieser Dateien direkt** — Änderungen nur über `deck.py`, sonst
+gehen sie beim nächsten Schreibvorgang verloren.
 
 **Neues Wort anlegen:**
 ```bash

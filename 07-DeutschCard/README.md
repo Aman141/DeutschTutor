@@ -19,7 +19,9 @@ priority cards, and progress made here is visible to the tutor. See
 - **Mistake-first study order** — words the tutor logged as wrong come up first
 - **Verb forms & prepositions** — Präteritum/Partizip II and fixed case on the card
 - **Vault sync** — the deck is a real file on disk, not just browser storage
-- **Offline-ready** — falls back to `localStorage`, works without the server
+- **Offline-safe merging** — changes are an append-only op log, so the app, the
+  tutor's CLI and (soon) the phone can each work offline and merge without
+  overwriting each other
 
 ## Getting Started
 
@@ -32,23 +34,33 @@ slash command `/karten` does the same thing.
 
 > Opening `index.html` directly still works, but the deck then lives only in your
 > browser and the tutor cannot see it. The badge in the navbar tells you which mode
-> you are in: **Vault** or **Offline**.
+> you are in: **Vault** (synced), **3 offen** (changes waiting for the server) or
+> **Offline**.
 
 ## Vault integration
 
-The deck lives at `../05-Vokabeln/deck.json`. Two things read and write it:
+The deck lives at `../05-Vokabeln/ops.jsonl`, an append-only log of changes. Two
+things add to it:
 
 ```
   Frau Ritter (the tutor)                    You (studying)
-      deck.py add / fail / pass                  the browser app
+      deck.py add / fail / pass                  the browser app (IndexedDB)
                   \                                /
-                   \                              /
-                    →   05-Vokabeln/deck.json   ←
+                   \                    serve.py  GET/POST /api/ops
+                    →   05-Vokabeln/ops.jsonl   ←
                                   |
-                          serve.py  GET/POST /api/deck
+                           replay (deck.py)
                                   |
-                        05-Vokabeln/*.md  (generated mirror, for Obsidian)
+                        05-Vokabeln/deck.json  (generated: the current deck)
+                        05-Vokabeln/*.md       (generated mirror, for Obsidian)
 ```
+
+Every change is an *op* — `add`, `edit`, `delete`, `review`, `fail` — with a unique
+id and a timestamp. Replaying all ops in timestamp order gives the deck, and both
+the app (`ops.js`) and the CLI (`deck.py`) run the same replay, so any device that
+holds the same ops shows the same deck. Ops are only ever appended, so a browser that
+was offline for a week sends its reviews and nothing the tutor logged meanwhile is
+lost. Op shapes are documented at the top of the op-log section in `deck.py`.
 
 So the loop closes in both directions:
 
@@ -78,21 +90,35 @@ python3 deck.py import-md         # pull in hand-written :: cards
 07-DeutschCard/
 ├── index.html      # App shell and all views
 ├── style.css       # Styles and card flip animation
-├── app.js          # All app logic (state, routing, storage)
-├── serve.py        # Static server + /api/deck sync endpoints
-├── deck.py         # Tutor-facing CLI over the deck
+├── app.js          # All app logic (state, routing, op log + sync)
+├── ops.js          # Op replay — must match replay() in deck.py
+├── serve.py        # Static server + /api/ops sync endpoints
+├── deck.py         # Tutor-facing CLI over the op log
+├── tests/          # Python + Node tests pinning both replays to fixtures/
 └── data/
     └── seed.json   # 50 starter words, used only to initialise an empty deck
 
 ../05-Vokabeln/
-├── deck.json       # the deck — source of truth
-├── deck.json.bak   # previous version, kept on every write
+├── ops.jsonl       # the op log — source of truth, the file to back up
+├── deck.json       # generated: the current deck (read it, don't write it)
+├── deck.pre-ops.json # the deck as it was before the op log, kept once
 └── *.md            # generated mirror for reading/searching in Obsidian
+
+## Tests
+
+```bash
+python3 -m unittest discover tests
+node --test tests/test_ops.js
+```
+
+Both run every `tests/fixtures/*.ops.jsonl` through their replay, in many arrival
+orders, and compare with the matching `*.expected.json`. Change replay rules in
+`ops.js` and `deck.py` together, and add a fixture for the new case.
 ```
 
 ## Word Data Model
 
-Each card in `deck.json` (and mirrored into `localStorage`) has this shape. The
+Each card in `deck.json` (the result of replaying the log) has this shape. The
 fields below the divider were added by the vault integration and are all optional —
 a card without them behaves exactly as before.
 
@@ -133,13 +159,14 @@ Or from the command line: `python3 deck.py add …` (see above).
 
 ## Resetting All Data
 
-With the vault sync in place, the browser is only a cache — clearing it is safe and
-the deck comes back from disk on reload:
+The browser keeps its own copy of the ops in IndexedDB. Clearing it is safe once
+the badge says **Vault** (nothing waiting) — the next load pulls everything back from
+the vault. With changes still waiting (`3 offen`), clearing loses those changes.
 
 ```js
-localStorage.removeItem('deutschcard_words'); location.reload();
+indexedDB.deleteDatabase('deutschcard'); location.reload();
 ```
 
-To reset the **deck itself**, delete `../05-Vokabeln/deck.json` and run
-`python3 deck.py import-seed`. The previous version is kept at `deck.json.bak`.
-Note this discards every mistake the tutor has logged.
+To reset the **deck itself**, move `../05-Vokabeln/ops.jsonl` and `deck.json` out of
+the way and run `python3 deck.py import-seed`. This discards every mistake the tutor
+has logged.

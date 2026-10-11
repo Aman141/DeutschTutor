@@ -1,0 +1,18 @@
+[
+  {"id": "c-hund", "german": "Hund", "gender": "der", "plural": "Hunde", "english": "dog",
+   "example": "", "tags": ["A1", "animals"], "known": true, "difficulty": 2,
+   "lastSeen": "2026-10-05", "forms": "", "prep": "", "mistakes": 2,
+   "mistakeKinds": ["artikel"], "fehlerTags": ["#genus"], "source": "L-012", "added": "2026-10-01"},
+  {"id": "c-vertrag", "german": "Vertrag", "gender": "der", "plural": "Vertraege", "english": "agreement",
+   "example": "Der Vertrag läuft ab.", "tags": ["B1", "arbeit"], "known": false, "difficulty": 0,
+   "lastSeen": null, "forms": "", "prep": "", "mistakes": 0,
+   "mistakeKinds": [], "fehlerTags": [], "source": "", "added": "2026-09-02"},
+  {"id": "c-gehen", "german": "gehen", "gender": "", "plural": "", "english": "",
+   "example": "", "tags": ["A1"], "known": false, "difficulty": 3,
+   "lastSeen": "2026-10-08", "forms": "ging, ist gegangen", "prep": "", "mistakes": 0,
+   "mistakeKinds": [], "fehlerTags": [], "source": "", "added": "2026-10-08"},
+  {"id": "c-tie", "german": "Tie-later", "gender": "", "plural": "", "english": "",
+   "example": "", "tags": [], "known": false, "difficulty": 0,
+   "lastSeen": null, "forms": "", "prep": "", "mistakes": 0,
+   "mistakeKinds": [], "fehlerTags": [], "source": "", "added": "2026-10-08"}
+]

@@ -11,7 +11,8 @@ Abfrage **durch dich**, mündlich und mit Varianten — die App
 App nicht kann: Artikel erfragen, Sätze bilden lassen, Kollokationen prüfen.
 
 Quelle ist immer das Deck, nie eine `.md`-Datei:
-**[05-Vokabeln/deck.json](../../05-Vokabeln/deck.json)**
+**[05-Vokabeln/deck.json](../../05-Vokabeln/deck.json)** (lesen; erzeugt aus
+`ops.jsonl` — Änderungen nur über `deck.py`)
 
 ## Ohne Argument: abfragen
 

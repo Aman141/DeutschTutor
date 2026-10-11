@@ -1,67 +1,184 @@
 // ── Storage ──────────────────────────────────────────────────────────────────
-// Two layers. The vault (05-Vokabeln/deck.json, via serve.py) is the source of
-// truth; localStorage is an offline cache so the app still works when opened as
-// a plain file. `vaultLive` records which one we are actually talking to.
-const STORAGE_KEY = 'deutschcard_words';
-const API = '/api/deck';
-let vaultLive = false;
-let pendingSave = null;
+// The deck is never stored or sent whole. Every change is an op (see ops.js)
+// appended to a log in IndexedDB and replayed into `words`. The ops this device
+// created wait in an outbox until the vault (serve.py) has accepted them; ops
+// from elsewhere (deck.py fail, another device) arrive by pulling after a cursor.
+// Because ops only accumulate, a device that was offline for a week merges its
+// changes without overwriting anyone else's.
+const API = '/api/ops';
+const LEGACY_KEY = 'deutschcard_words';   // pre-op-log localStorage deck
+const PUSH_CHUNK = 500;
 
-function loadWords() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
-  } catch { return []; }
+let db = null;              // IndexedDB handle; null = memory only (still works)
+let device = 'web';
+let cursor = 0;             // ops already pulled from the server
+let opLog = [];             // every op this device knows, any order
+let knownOpIds = new Set();
+let outbox = new Set();     // ids of our ops the server has not accepted yet
+let opState = newState();
+let lastOp = null;          // the latest op by (at, id) — enables incremental apply
+let syncing = false;
+let syncAgain = false;      // a change arrived mid-sync; run once more after it
+let syncTimer = null;
+let serverReachable = false;
+
+function idbRequest(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
 }
 
-// Pull the deck from the vault. Mistakes the tutor logged (deck.py fail) live
-// there, so on load the vault wins over the browser cache.
-async function loadFromVault() {
+// Fire-and-forget write; the in-memory log is already updated, so a failed
+// write only costs durability, never the current session.
+function idbWrite(store, fn) {
+  if (!db) return;
   try {
-    const res = await fetch(API, { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const deck = await res.json();
-    if (!Array.isArray(deck)) throw new Error('deck is not an array');
-    vaultLive = true;
-    words = deck;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(words));
-    setSyncState('live', words.length + ' Karten aus dem Vault');
-    return true;
+    const tx = db.transaction(store, 'readwrite');
+    fn(tx.objectStore(store));
+    tx.onerror = () => console.error('IndexedDB write failed', tx.error);
+  } catch (e) { console.error('IndexedDB write failed', e); }
+}
+
+async function openStore() {
+  try {
+    const req = indexedDB.open('deutschcard', 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore('ops', { keyPath: 'id' });
+      req.result.createObjectStore('outbox', { keyPath: 'id' });
+      req.result.createObjectStore('meta');
+    };
+    db = await idbRequest(req);
+    const tx = db.transaction(['ops', 'outbox', 'meta'], 'readonly');
+    const [ops, out, dev, cur] = await Promise.all([
+      idbRequest(tx.objectStore('ops').getAll()),
+      idbRequest(tx.objectStore('outbox').getAll()),
+      idbRequest(tx.objectStore('meta').get('device')),
+      idbRequest(tx.objectStore('meta').get('cursor')),
+    ]);
+    opLog = ops;
+    outbox = new Set(out.map(x => x.id));
+    cursor = cur || 0;
+    device = dev || 'web-' + Math.random().toString(36).slice(2, 8);
+    if (!dev) idbWrite('meta', s => s.put(device, 'device'));
   } catch (e) {
-    vaultLive = false;
-    setSyncState('offline', 'nur im Browser gespeichert — serve.py läuft nicht');
-    return false;
+    console.error('IndexedDB unavailable, changes last only this session', e);
+    db = null;
   }
+  knownOpIds = new Set(opLog.map(o => o.id));
+  rebuild();
 }
 
-function saveWords(words) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(words));   // never lose data
-  if (!vaultLive) return;
-  clearTimeout(pendingSave);              // coalesce bursts of card marking
-  setSyncState('saving', 'speichere …');
-  pendingSave = setTimeout(() => pushToVault(words), 400);
+function rebuild() {
+  opState = replay(opLog);
+  lastOp = opLog.filter(validOp).sort(compareOps).pop() || null;
+  words = deckOf(opState);
+  // the study queue holds card objects; point it at the freshly built ones
+  studyQueue = studyQueue.map(w => opState.cards.get(w.id)).filter(Boolean);
 }
 
-async function pushToVault(words) {
+function todayLocal() {
+  return new Date().toLocaleDateString('sv');   // YYYY-MM-DD in local time, like deck.py
+}
+
+function newOpId() {
+  return (crypto.randomUUID ? crypto.randomUUID() : generateId() + generateId()).replace(/-/g, '');
+}
+
+// The one way to change the deck. Never mutate `words` directly: the change
+// would vanish on the next replay and never reach the vault.
+function emit(op, card, payload = {}) {
+  const o = { id: newOpId(), at: new Date().toISOString(), device, op, card, ...payload };
+  opLog.push(o);
+  knownOpIds.add(o.id);
+  outbox.add(o.id);
+  if (!lastOp || compareOps(lastOp, o) < 0) {
+    applyOp(opState, o);          // the usual case: the new op is the newest
+    lastOp = o;
+    words = deckOf(opState);
+  } else {
+    rebuild();                    // clock went backwards — replay from scratch
+  }
+  idbWrite('ops', s => s.put(o));
+  idbWrite('outbox', s => s.put({ id: o.id }));
+  scheduleSync(400);              // coalesce a run of card marks into one push
+  updateSyncBadge();
+}
+
+function receive(ops) {
+  const fresh = ops.filter(o => validOp(o) && !knownOpIds.has(o.id));
+  if (!fresh.length) return 0;
+  fresh.forEach(o => { opLog.push(o); knownOpIds.add(o.id); });
+  idbWrite('ops', s => fresh.forEach(o => s.put(o)));
+  rebuild();
+  return fresh.length;
+}
+
+function scheduleSync(delay) {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(sync, delay);
+}
+
+async function sync() {
+  if (location.protocol === 'file:') return;
+  if (syncing) { syncAgain = true; return; }
+  syncing = true;
+  updateSyncBadge();
+  let changed = 0, error = null;
   try {
-    const res = await fetch(API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(words),
-    });
+    // push: our pending ops, in chunks so a long-offline device is not one huge body
+    const pending = opLog.filter(o => outbox.has(o.id));
+    for (let i = 0; i < pending.length; i += PUSH_CHUNK) {
+      const chunk = pending.slice(i, i + PUSH_CHUNK);
+      const res = await fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ops: chunk }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || 'HTTP ' + res.status);
+      chunk.forEach(o => outbox.delete(o.id));
+      idbWrite('outbox', s => chunk.forEach(o => s.delete(o.id)));
+    }
+    // pull: everything after our cursor, including what we just pushed
+    const res = await fetch(`${API}?since=${cursor}`, { cache: 'no-store' });
     const out = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(out.error || 'HTTP ' + res.status);
-    setSyncState('live', out.count + ' Karten im Vault');
+    changed = receive(out.ops || []);
+    cursor = out.seq;
+    idbWrite('meta', s => s.put(cursor, 'cursor'));
+    serverReachable = true;
   } catch (e) {
-    setSyncState('error', 'Vault nicht erreichbar — ' + e.message);
+    serverReachable = false;
+    error = e instanceof TypeError ? null : e.message;   // TypeError = no server at all
+  } finally {
+    syncing = false;
   }
+  updateSyncBadge(error);
+  if (changed) refreshViews();
+  if (syncAgain && serverReachable) { syncAgain = false; sync(); }
 }
 
-function setSyncState(state, detail) {
+function updateSyncBadge(error) {
   const el = document.getElementById('sync-badge');
   if (!el) return;
+  const n = outbox.size;
+  let state, label, detail;
+  if (error) {
+    [state, label, detail] = ['error', 'Fehler', 'Vault meldet: ' + error];
+  } else if (syncing) {
+    [state, label, detail] = ['saving', 'Vault', 'synchronisiere …'];
+  } else if (serverReachable && !n) {
+    [state, label, detail] = ['live', 'Vault', words.length + ' Karten · synchron mit dem Vault'];
+  } else if (n) {
+    [state, label, detail] = ['pending', n + ' offen',
+      n + ' Änderung(en) warten auf den Vault — werden gesendet, sobald serve.py erreichbar ist'];
+  } else {
+    [state, label, detail] = ['offline', 'Offline', 'Vault nicht erreichbar — serve.py läuft nicht'];
+  }
   el.className = 'sync-badge ' + state;
-  el.textContent = { live: 'Vault', saving: 'Vault', offline: 'Offline', error: 'Fehler' }[state];
-  el.title = detail || '';
+  el.textContent = label;
+  el.title = detail;
 }
 
 function generateId() {
@@ -69,7 +186,7 @@ function generateId() {
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
-let words = loadWords();
+let words = [];
 let studyQueue = [];
 let studyIndex = 0;
 let sessionKnown = 0;
@@ -77,33 +194,31 @@ let sessionLearning = 0;
 let isFlipped = false;
 let activeFilters = { tag: 'all', level: 'all' };
 
-// ── Seed data (load once) ────────────────────────────────────────────────────
-async function maybeSeed() {
-  if (vaultLive || words.length > 0) return;   // serve.py seeds the vault itself
+// ── First run ────────────────────────────────────────────────────────────────
+// An empty log after the first sync means this browser has never seen the deck.
+// Served by serve.py, the vault seeds itself, so an empty log here just means the
+// server is down. Only a plain file:// copy seeds locally — seeding over http
+// would mint a second set of seed cards that merge into the vault as duplicates.
+async function firstRun() {
+  let legacy = [];
   try {
-    const res = await fetch('data/seed.json');
-    const seed = await res.json();
-    words = seed.map(w => ({
-      id: generateId(),
-      german: w.german,
-      gender: w.gender || '',
-      plural: w.plural || '',
-      english: w.english,
-      example: w.example || '',
-      tags: w.tags || [],
-      known: false,
-      difficulty: 0,
-      lastSeen: null,
-      forms: w.forms || '',
-      prep: w.prep || '',
-      mistakes: 0,
-      mistakeKinds: [],
-    }));
-    saveWords(words);
-    renderAll();
-  } catch (e) {
-    console.error('Seed load failed', e);
+    legacy = JSON.parse(localStorage.getItem(LEGACY_KEY)) || [];
+    if (db) localStorage.removeItem(LEGACY_KEY);   // without IndexedDB it is still the only copy
+  } catch {}
+  if (opLog.length) return;
+  if (legacy.length) {
+    // the old browser cache: same card ids as the vault, so adds of cards the
+    // vault already has are no-ops when they meet
+    legacy.forEach(w => w && w.id && w.german && emit('add', w.id, { data: w }));
+  } else if (location.protocol === 'file:') {
+    try {
+      const seed = await (await fetch('data/seed.json')).json();
+      seed.forEach(w => emit('add', generateId(), { data: w }));
+    } catch (e) {
+      console.error('Seed load failed', e);
+    }
   }
+  renderAll();
 }
 
 // ── Navigation ───────────────────────────────────────────────────────────────
@@ -235,23 +350,16 @@ function flipCard() {
   document.getElementById('flashcard').classList.toggle('flipped', isFlipped);
   if (isFlipped) {
     document.getElementById('study-actions').style.visibility = 'visible';
-    const w = studyQueue[studyIndex];
-    w.lastSeen = new Date().toISOString().slice(0, 10);
   }
 }
 
 function markCard(known) {
   if (studyIndex >= studyQueue.length) return;
   const word = studyQueue[studyIndex];
-  word.known = known;
-  if (known) {
-    sessionKnown++;
-    word.difficulty = Math.max(0, word.difficulty - 1);
-  } else {
-    sessionLearning++;
-    word.difficulty = Math.min(3, word.difficulty + 1);
-  }
-  saveWords(words);
+  if (known) sessionKnown++;
+  else sessionLearning++;
+  // difficulty and lastSeen follow from the op — see applyOp() in ops.js
+  emit('review', word.id, { known, date: todayLocal() });
 
   studyIndex++;
   updateProgress();
@@ -377,17 +485,20 @@ function saveCard(e) {
   };
 
   if (id) {
-    const idx = words.findIndex(w => w.id === id);
-    if (idx !== -1) Object.assign(words[idx], data);
+    // only the fields that changed, so an edit here cannot undo a concurrent
+    // edit of another field on another device
+    const w = words.find(x => x.id === id);
+    const changed = {};
+    if (w) {
+      for (const [k, v] of Object.entries(data)) {
+        if (JSON.stringify(w[k] ?? '') !== JSON.stringify(v)) changed[k] = v;
+      }
+    }
+    if (Object.keys(changed).length) emit('edit', id, { data: changed });
   } else {
-    words.push({
-      id: generateId(), known: false, difficulty: 0, lastSeen: null,
-      mistakes: 0, mistakeKinds: [], fehlerTags: [], source: '',
-      added: new Date().toISOString().slice(0, 10), ...data,
-    });
+    emit('add', generateId(), { data: { ...data, added: todayLocal() } });
   }
 
-  saveWords(words);
   closeModal();
   renderManage();
   renderHome();
@@ -395,8 +506,7 @@ function saveCard(e) {
 
 function deleteWord(id) {
   if (!confirm('Delete this word?')) return;
-  words = words.filter(w => w.id !== id);
-  saveWords(words);
+  emit('delete', id);
   renderManage();
   renderHome();
 }
@@ -445,11 +555,21 @@ function renderAll() {
   renderHome();
 }
 
+// After ops arrive from elsewhere. The study view is left alone: its queue was
+// re-pointed at the new card objects by rebuild(), and redrawing would lose the
+// card that is on screen.
+function refreshViews() {
+  renderHome();
+  const active = document.querySelector('.view.active');
+  if (active && active.id === 'view-manage') renderWordList();
+  if (active && active.id === 'view-stats') renderStats();
+}
+
 // ── Event wiring ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadFromVault();     // the vault wins if serve.py is running
-  await maybeSeed();         // otherwise fall back to the bundled seed
+  await openStore();         // this device's log, instantly — no network needed
   renderAll();
+  updateSyncBadge();
 
   // Nav
   document.querySelectorAll('[data-view]').forEach(el => {
@@ -505,4 +625,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (editBtn) openModal(editBtn.dataset.id);
     if (delBtn) deleteWord(delBtn.dataset.id);
   });
+
+  // Sync: now, whenever the page comes back into view or the network returns,
+  // and once a minute while visible (picks up deck.py fail during a lesson).
+  window.addEventListener('online', () => sync());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });
+  setInterval(() => { if (!document.hidden) sync(); }, 60000);
+  await sync();
+  await firstRun();
 });

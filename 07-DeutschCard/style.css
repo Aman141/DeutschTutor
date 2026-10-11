@@ -467,6 +467,7 @@ body {
 .sync-badge.saving  { background: #1b4332; color: #74c69d; border-color: #2d6a4f; opacity: 0.55; }
 .sync-badge.offline { background: #343a40; color: #adb5bd; border-color: #495057; }
 .sync-badge.error   { background: #4a1520; color: #f8a5b5; border-color: #7d2438; }
+.sync-badge.pending { background: #4a3b10; color: #ffd166; border-color: #7a5f12; }
 
 /* Verb forms / fixed preposition on the card back */
 .card-forms {

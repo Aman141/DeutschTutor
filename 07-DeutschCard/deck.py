@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """deck.py — the bridge between the Deutsch vault and the DeutschCard app.
 
-Source of truth is 05-Vokabeln/deck.json. The app reads and writes it through
-serve.py; Frau Ritter reads and writes it through this CLI. The Markdown files in
-05-Vokabeln/ are a generated, human-readable mirror (regenerated on every write).
+Source of truth is 05-Vokabeln/ops.jsonl: an append-only log of changes ("ops")
+from every device — this CLI, the browser, later the phone. Replaying the log in
+(at, id) order gives the deck; the same replay runs in the app (ops.js), so every
+device that holds the same ops computes the same deck. Ops are never edited, only
+appended, which is what makes offline devices safe to merge.
+
+05-Vokabeln/deck.json and the Markdown files next to it are generated from the
+log on every write — read them freely, never write them by hand.
 
 Usage:
   deck.py add "Vertrag" --gender der --plural "Verträge" --en "contract" \
@@ -13,23 +18,29 @@ Usage:
   deck.py hard [-n 20] [--tag arbeit]
   deck.py due  [-n 20] [--days 3]
   deck.py stats
-  deck.py sync-md
+  deck.py sync-md            # rebuild deck.json + Markdown from the log
   deck.py import-md          # pull hand-written :: cards from 05-Vokabeln/*.md
-  deck.py import-seed        # one-time: data/seed.json -> deck.json
+  deck.py import-seed        # one-time: data/seed.json -> deck
 """
 
 import argparse
+import copy
 import json
 import os
 import random
 import re
+import shutil
 import sys
-from datetime import date, datetime, timedelta
+import uuid
+from datetime import date, datetime, timedelta, timezone
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 VAULT = os.path.dirname(APP_DIR)
 VOKABELN = os.path.join(VAULT, "05-Vokabeln")
 DECK = os.path.join(VOKABELN, "deck.json")
+OPS = os.path.join(VOKABELN, "ops.jsonl")
+DEVICE = os.environ.get("DEUTSCHCARD_DEVICE", "mac")
+OP_TYPES = ("add", "edit", "delete", "review", "fail")
 LEVELS = {"A1", "A2", "B1", "B2", "C1"}
 KINDS = ("artikel", "plural", "bedeutung", "form", "praeposition", "rechtschreibung")
 
@@ -42,16 +53,147 @@ FIELDS = {
 }
 
 
-# ── storage ──────────────────────────────────────────────────────────────────
-def load():
-    if not os.path.exists(DECK):
+# ── op log ───────────────────────────────────────────────────────────────────
+# One op per line. Every op has: id (unique), at (UTC ISO, ms precision — the
+# replay order), device, op (one of OP_TYPES), card (card id). Payload by type:
+#   add     data: {full card}       creates the card; ignored if the id exists
+#   edit    data: {field: value}    later op wins, field by field
+#   delete  —                       tombstone: the card stays gone
+#   review  known, date             the app's Known / Still Learning buttons
+#   fail    kind, tag, source, date a real mistake in a lesson
+# Unknown op types are skipped, so an older client never chokes on a newer log.
+# KEEP IN SYNC with ops.js — tests/fixtures/ pins both to the same output.
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def make_op(op_type, card, at=None, **payload):
+    return {"id": uuid.uuid4().hex, "at": at or now_iso(), "device": DEVICE,
+            "op": op_type, "card": card, **payload}
+
+
+def valid_op(o):
+    return (isinstance(o, dict) and isinstance(o.get("id"), str) and o["id"]
+            and isinstance(o.get("at"), str) and isinstance(o.get("card"), str)
+            and o["card"] and isinstance(o.get("op"), str))
+
+
+def read_ops():
+    if not os.path.exists(OPS):
         return []
+    ops = []
+    with open(OPS, encoding="utf-8") as f:
+        for n, line in enumerate(f, 1):
+            if not line.strip():
+                continue
+            try:
+                ops.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                sys.exit(f"ops.jsonl Zeile {n} ist beschädigt ({e}).")
+    return ops
+
+
+def append_ops(new):
+    """Append ops to the log and regenerate deck.json + Markdown. Returns the deck."""
+    os.makedirs(VOKABELN, exist_ok=True)
+    with open(OPS, "a", encoding="utf-8") as f:
+        for o in new:
+            f.write(json.dumps(o, ensure_ascii=False) + "\n")
+    words = replay(read_ops())
+    save(words)
+    return words
+
+
+def card_from(data, op):
+    out = {}
+    for k, default in FIELDS.items():
+        v = data.get(k)
+        out[k] = copy.deepcopy(default) if v is None else copy.deepcopy(v)
+    out["id"] = op["card"]
+    out["added"] = out["added"] or op["at"][:10]
+    return out
+
+
+def apply_op(state, o):
+    cards, order, deleted = state["cards"], state["order"], state["deleted"]
+    cid, kind = o["card"], o["op"]
+    if kind == "add":
+        if cid not in cards and cid not in deleted:
+            cards[cid] = card_from(o.get("data") or {}, o)
+            order.append(cid)
+        return
+    w = cards.get(cid)
+    if w is None:
+        return
+    if kind == "edit":
+        for k, v in (o.get("data") or {}).items():
+            if k in FIELDS and k != "id":
+                w[k] = copy.deepcopy(v)
+    elif kind == "delete":
+        del cards[cid]
+        order.remove(cid)
+        deleted.add(cid)
+    elif kind == "review":
+        w["known"] = bool(o.get("known"))
+        d = w["difficulty"] or 0
+        w["difficulty"] = max(0, d - 1) if w["known"] else min(3, d + 1)
+        w["lastSeen"] = o.get("date") or o["at"][:10]
+    elif kind == "fail":
+        w["mistakes"] = (w["mistakes"] or 0) + 1
+        w["known"] = False
+        w["difficulty"] = 3
+        w["lastSeen"] = o.get("date") or o["at"][:10]
+        if o.get("kind") and o["kind"] not in w["mistakeKinds"]:
+            w["mistakeKinds"].append(o["kind"])
+        if o.get("tag") and o["tag"] not in w["fehlerTags"]:
+            w["fehlerTags"].append(o["tag"])
+        if o.get("source"):
+            w["source"] = o["source"]
+
+
+def replay(ops):
+    state = {"cards": {}, "order": [], "deleted": set()}
+    unique = {}
+    for o in ops:
+        if valid_op(o):
+            unique.setdefault(o["id"], o)   # a duplicate op id is applied once
+    for o in sorted(unique.values(), key=lambda o: (o["at"], o["id"])):
+        apply_op(state, o)
+    return [state["cards"][cid] for cid in state["order"]]
+
+
+def migrate_legacy():
+    """First run after the switch: turn the old deck.json into one `add` per card.
+
+    Cards keep their ids and full state (known, difficulty, mistakes …). Each gets
+    its own millisecond so the replay keeps the old card order.
+    """
+    if os.path.exists(OPS) or not os.path.exists(DECK):
+        return
     with open(DECK, encoding="utf-8") as f:
         try:
-            data = json.load(f)
+            old = json.load(f)
         except json.JSONDecodeError as e:
             sys.exit(f"deck.json ist beschädigt ({e}). Sichere Kopie: {DECK}.bak")
-    return [normalise(w) for w in data]
+    if not old:
+        return
+    shutil.copy2(DECK, os.path.join(VOKABELN, "deck.pre-ops.json"))
+    base = datetime.now(timezone.utc)
+    ops = []
+    for i, w in enumerate(old):
+        w = normalise(w)
+        at = (base + timedelta(milliseconds=i)).isoformat(timespec="milliseconds")
+        ops.append(make_op("add", w["id"], at=at.replace("+00:00", "Z"), data=w))
+    append_ops(ops)
+    print(f"deck.json → ops.jsonl migriert ({len(ops)} Karten). "
+          "Alte Datei: 05-Vokabeln/deck.pre-ops.json", file=sys.stderr)
+
+
+# ── storage ──────────────────────────────────────────────────────────────────
+def load():
+    migrate_legacy()
+    return replay(read_ops())
 
 
 def normalise(w):
@@ -67,6 +209,7 @@ def normalise(w):
 
 
 def save(words, sync_md=True):
+    """Write the generated views of the log. Only append_ops() should call this."""
     os.makedirs(VOKABELN, exist_ok=True)
     if os.path.exists(DECK):                      # keep one generation of backup
         os.replace(DECK, DECK + ".bak")
@@ -184,7 +327,7 @@ def parse_head(head):
 def import_md():
     words = load()
     by_name = {w["german"].lower(): w for w in words}
-    added = 0
+    new = []
     for fn in sorted(os.listdir(VOKABELN)):
         if not fn.endswith(".md") or fn == "README.md":
             continue
@@ -205,11 +348,11 @@ def import_md():
                     "example": (m.group("ex") or "").strip(),
                     "tags": [topic or os.path.splitext(fn)[0]],
                 })
-                words.append(card)
+                new.append(make_op("add", card["id"], data=card))
                 by_name[card["german"].lower()] = card
-                added += 1
-    save(words)
-    print(f"{added} neue Karte(n) aus Markdown eingelesen · {len(words)} gesamt")
+    if new:
+        words = append_ops(new)
+    print(f"{len(new)} neue Karte(n) aus Markdown eingelesen · {len(words)} gesamt")
 
 
 # ── commands ─────────────────────────────────────────────────────────────────
@@ -223,8 +366,7 @@ def cmd_add(a):
         "english": a.en, "example": a.example or "", "tags": tags,
         "forms": a.forms or "", "prep": a.prep or "", "source": a.source or "",
     })
-    words.append(card)
-    save(words)
+    words = append_ops([make_op("add", card["id"], data=card)])
     print(f"+ {card_line(card)}")
     print(f"  {len(words)} Karten im Deck")
 
@@ -235,17 +377,9 @@ def cmd_fail(a):
     w = find(words, a.german)
     if not w:
         sys.exit(f"'{a.german}' nicht im Deck. Erst 'deck.py add'.")
-    w["mistakes"] += 1
-    w["known"] = False
-    w["difficulty"] = 3
-    w["lastSeen"] = date.today().isoformat()
-    if a.kind and a.kind not in w["mistakeKinds"]:
-        w["mistakeKinds"].append(a.kind)
-    if a.tag and a.tag not in w["fehlerTags"]:
-        w["fehlerTags"].append(a.tag)
-    if a.source:
-        w["source"] = a.source
-    save(words)
+    words = append_ops([make_op("fail", w["id"], kind=a.kind or "", tag=a.tag or "",
+                                source=a.source or "", date=date.today().isoformat())])
+    w = next(x for x in words if x["id"] == w["id"])
     kinds = ", ".join(w["mistakeKinds"]) or "—"
     print(f"✗ {w['gender']} {w['german']} · {w['mistakes']}. Fehler · Art: {kinds}")
     print("  → steht in der App jetzt vorn")
@@ -256,10 +390,8 @@ def cmd_pass(a):
     w = find(words, a.german)
     if not w:
         sys.exit(f"'{a.german}' nicht im Deck.")
-    w["known"] = True
-    w["difficulty"] = max(0, w["difficulty"] - 1)
-    w["lastSeen"] = date.today().isoformat()
-    save(words)
+    words = append_ops([make_op("review", w["id"], known=True, date=date.today().isoformat())])
+    w = next(x for x in words if x["id"] == w["id"])
     print(f"✓ {w['german']} · difficulty {w['difficulty']}")
 
 
@@ -332,6 +464,7 @@ def cmd_stats(a):
 
 def cmd_sync_md(a):
     words = load()
+    save(words, sync_md=False)
     files = write_markdown(words)
     print(f"{len(words)} Karten → {len(files)} Datei(en) in 05-Vokabeln/")
     for f in sorted(files):
@@ -345,8 +478,8 @@ def cmd_import_seed(a):
     words = load()
     have = {w["german"].lower() for w in words}
     added = [normalise(s) for s in seed if s["german"].lower() not in have]
-    words += added
-    save(words)
+    if added:
+        words = append_ops([make_op("add", w["id"], data=w) for w in added])
     print(f"{len(added)} Karten aus seed.json übernommen · {len(words)} gesamt")
 
 
@@ -389,7 +522,7 @@ def main():
 
     for name, fn, helptext in (
         ("stats", cmd_stats, "Überblick"),
-        ("sync-md", cmd_sync_md, "Markdown-Spiegel neu schreiben"),
+        ("sync-md", cmd_sync_md, "deck.json + Markdown aus dem Log neu schreiben"),
         ("import-md", lambda a: import_md(), "handgeschriebene :: Karten einlesen"),
         ("import-seed", cmd_import_seed, "data/seed.json übernehmen"),
     ):

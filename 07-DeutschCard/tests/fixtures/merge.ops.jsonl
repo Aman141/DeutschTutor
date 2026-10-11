@@ -1,0 +1,24 @@
+{"id":"a1","at":"2026-10-01T08:00:00.000Z","device":"mac","op":"add","card":"c-hund","data":{"german":"Hund","gender":"der","plural":"Hunde","english":"dog","tags":["A1","animals"],"difficulty":1}}
+{"id":"f1","at":"2026-10-03T10:00:00.000Z","device":"mac","op":"fail","card":"c-hund","kind":"artikel","tag":"#genus","source":"L-012","date":"2026-10-03"}
+{"id":"r1","at":"2026-10-02T09:00:00.000Z","device":"phone","op":"review","card":"c-hund","known":true,"date":"2026-10-02"}
+{"id":"f1","at":"2026-10-03T10:00:00.000Z","device":"mac","op":"fail","card":"c-hund","kind":"artikel","tag":"#genus","source":"L-012","date":"2026-10-03"}
+{"id":"f2","at":"2026-10-04T10:00:00.000Z","device":"mac","op":"fail","card":"c-hund","kind":"artikel","tag":"#genus","date":"2026-10-04"}
+{"id":"r2","at":"2026-10-05T07:00:00.000Z","device":"phone","op":"review","card":"c-hund","known":false,"date":"2026-10-05"}
+{"id":"r3","at":"2026-10-05T07:01:00.000Z","device":"phone","op":"review","card":"c-hund","known":true}
+{"id":"a2","at":"2026-10-01T08:00:00.001Z","device":"mac","op":"add","card":"c-vertrag","data":{"german":"Vertrag","gender":"der","plural":"Verträge","english":"contract","tags":["B1","arbeit"],"mistakeKinds":null,"added":"2026-09-02"}}
+{"id":"e1","at":"2026-10-06T12:00:00.000Z","device":"phone","op":"edit","card":"c-vertrag","data":{"english":"agreement","example":"Der Vertrag läuft ab."}}
+{"id":"e2","at":"2026-10-06T11:00:00.000Z","device":"web","op":"edit","card":"c-vertrag","data":{"english":"contract (legal)","plural":"Vertraege","id":"hijack","bogus":1}}
+{"id":"a3","at":"2026-10-07T00:00:00.000Z","device":"web","op":"add","card":"c-vertrag","data":{"german":"DUPLICATE"}}
+{"id":"a4","at":"2026-10-01T08:00:00.002Z","device":"mac","op":"add","card":"c-katze","data":{"german":"Katze","gender":"die"}}
+{"id":"d1","at":"2026-10-02T00:00:00.000Z","device":"phone","op":"delete","card":"c-katze"}
+{"id":"e3","at":"2026-10-03T00:00:00.000Z","device":"web","op":"edit","card":"c-katze","data":{"english":"cat"}}
+{"id":"a5","at":"2026-10-04T00:00:00.000Z","device":"web","op":"add","card":"c-katze","data":{"german":"Katze"}}
+{"id":"r4","at":"2026-10-01T09:00:00.000Z","device":"phone","op":"review","card":"c-ghost","known":true}
+{"id":"a6","at":"2026-10-08T00:00:00.000Z","device":"mac","op":"add","card":"c-gehen","data":{"german":"gehen","forms":"ging, ist gegangen","tags":["A1"],"difficulty":3}}
+{"id":"r5","at":"2026-10-08T01:00:00.000Z","device":"phone","op":"review","card":"c-gehen","known":false,"date":"2026-10-08"}
+{"id":"zz","at":"2026-10-08T00:00:00.000Z","device":"mac","op":"add","card":"c-tie","data":{"german":"Tie-later"}}
+{"id":"aa","at":"2026-10-08T00:00:00.000Z","device":"mac","op":"edit","card":"c-tie","data":{"english":"never applied: edit sorts before add"}}
+{"id":"x1","at":"2026-10-09T00:00:00.000Z","device":"future","op":"rate","card":"c-hund","grade":4}
+{"id":"","at":"2026-10-09T00:00:00.000Z","op":"delete","card":"c-hund"}
+{"at":"2026-10-09T00:00:00.000Z","op":"delete","card":"c-hund"}
+{"id":"x2","op":"delete","card":"c-hund"}

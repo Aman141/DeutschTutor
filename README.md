@@ -250,15 +250,17 @@ stops working.
 
 ### Vocabulary is a two-way loop
 
-The deck is a real file, [05-Vokabeln/deck.json](05-Vokabeln/deck.json). Both the tutor
-and the flashcard app read and write it:
+The deck is a real file on disk — an append-only log of changes,
+`05-Vokabeln/ops.jsonl`. Both the tutor and the flashcard app add to it, and neither
+can overwrite the other's changes, even when the app was offline for a while:
 
 ```
   Frau Ritter ──deck.py──┐                    ┌──the browser app
                          ↓                    ↓
-                    05-Vokabeln/deck.json  ←──serve.py  /api/deck
+                    05-Vokabeln/ops.jsonl  ←──serve.py  /api/ops
                          ↓
-                    05-Vokabeln/*.md   (generated mirror, for Obsidian)
+                    05-Vokabeln/deck.json  (generated: the current deck, to read)
+                    05-Vokabeln/*.md       (generated mirror, for Obsidian)
 ```
 
 So it closes in both directions:
@@ -412,9 +414,9 @@ you call it:
 Check `say -v '?' | grep de_DE` and use a name from your own list. *Petra*, *Markus* and
 *Yannick* are not on current macOS.
 
-**Flashcard app shows `Offline` in the navbar** — `serve.py` is not running, so the app
-is using browser storage and nothing reaches the vault. Start it with `/karten`, or
-`python3 07-DeutschCard/serve.py`.
+**Flashcard app shows `Offline` or `3 offen` in the navbar** — `serve.py` is not
+running. Your changes wait in the browser and are sent as soon as it is reachable
+again; nothing is lost. Start it with `/karten`, or `python3 07-DeutschCard/serve.py`.
 
 **"Port already in use"** — `serve.py` picks the next free port automatically. Read the
 URL from its output rather than assuming 8080. Kill a stray one with
@@ -427,8 +429,9 @@ actually made. Run `/lesson` a few times first.
 `05-Vokabeln/`. Recover with `python3 07-DeutschCard/deck.py import-md`, and add cards with
 `deck.py add` in future.
 
-**Corrupt deck** — `05-Vokabeln/deck.json.bak` is the version immediately before the
-last write. Copy it back over `deck.json`.
+**Corrupt deck** — `deck.json` is generated; rebuild it with
+`python3 07-DeutschCard/deck.py sync-md`. The file worth backing up is
+`05-Vokabeln/ops.jsonl`.
 
 **Claude asks permission constantly** — you skipped the `/permissions` step in
 [install 1](#1--get-the-vault-and-open-a-session).

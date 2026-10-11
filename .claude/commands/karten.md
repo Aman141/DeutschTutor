@@ -6,9 +6,9 @@ allowed-tools: Bash(python3:*), Bash(pkill:*), Bash(lsof:*), Read, Glob, Grep
 
 # /karten $ARGUMENTS
 
-Starte die Flashcard-App. Sie liest und schreibt
-[05-Vokabeln/deck.json](../../05-Vokabeln/deck.json) — dieselbe Datei, aus der
-Frau Ritter arbeitet.
+Starte die Flashcard-App. Sie tauscht Änderungen mit `05-Vokabeln/ops.jsonl` aus —
+demselben Protokoll, in das Frau Ritter mit `deck.py` schreibt; daraus entsteht
+[05-Vokabeln/deck.json](../../05-Vokabeln/deck.json).
 
 ## Vorher: Fehler des Tages in das Deck schieben
 
@@ -51,8 +51,10 @@ Läuft schon einer? `lsof -ti :8080` bzw. beenden mit `pkill -f serve.py`.
   am längsten nicht gesehenen.
 - Auf der Rückseite steht bei solchen Karten, **wie oft und auf welche Art** ich das
   Wort falsch hatte.
-- Das Abzeichen oben rechts zeigt `Vault`, wenn geschrieben wird — bei `Offline`
-  läuft `serve.py` nicht und alles bleibt im Browser hängen.
+- Das Abzeichen oben rechts zeigt `Vault`, wenn alles synchron ist. `3 offen`
+  heißt: drei Änderungen warten im Browser und werden gesendet, sobald `serve.py`
+  erreichbar ist — nichts geht verloren. Die App holt alle 60 Sekunden neue
+  Fehler ab, die Frau Ritter mit `deck.py fail` einträgt.
 
 ## Danach
 

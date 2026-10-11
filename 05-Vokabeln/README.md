@@ -1,19 +1,23 @@
 # 05 · Vokabeln
 
-## Die Quelle der Wahrheit ist `deck.json`
+## Die Quelle der Wahrheit ist `ops.jsonl`
 
-[deck.json](deck.json) ist das Deck. Zwei Dinge greifen darauf zu:
+`ops.jsonl` ist ein Protokoll: jede Änderung am Deck ist eine Zeile, angehängt und
+nie überschrieben. Zwei Dinge schreiben hinein:
 
 - die **Flashcard-App** in [../07-DeutschCard/](../07-DeutschCard/) — starten mit `/karten`
 - **Frau Ritter** über `07-DeutschCard/deck.py`
 
-Beide schreiben in dieselbe Datei. Deshalb sieht die App die Fehler, die ich im
-Unterricht gemacht habe, und deshalb sieht Frau Ritter, was ich in der App gelernt
-habe.
+Deshalb sieht die App die Fehler, die ich im Unterricht gemacht habe, und deshalb
+sieht Frau Ritter, was ich in der App gelernt habe — und keiner überschreibt die
+Änderungen des anderen, auch wenn die App eine Weile offline war.
+
+[deck.json](deck.json) ist das daraus berechnete Deck: zum Lesen, nach jedem
+Schreibvorgang neu erzeugt.
 
 ## Die `.md`-Dateien sind generiert
 
-Jede andere Datei hier (`wohnung.md`, `arbeit.md`, …) wird aus `deck.json`
+Jede andere Datei hier (`wohnung.md`, `arbeit.md`, …) wird aus dem Protokoll
 erzeugt, damit ich in Obsidian suchen, lesen und verlinken kann. **Nicht direkt
 hineinschreiben** — beim nächsten Schreibvorgang wird sie überschrieben.
 
@@ -47,11 +51,12 @@ die Karten weiterhin abfragen kann, wenn ich lieber in Obsidian bleibe.
 python3 07-DeutschCard/deck.py stats            # Überblick
 python3 07-DeutschCard/deck.py hard -n 20       # Problemkarten
 python3 07-DeutschCard/deck.py due --days 3     # lange nicht gesehen
-python3 07-DeutschCard/deck.py sync-md          # Spiegel neu schreiben
+python3 07-DeutschCard/deck.py sync-md          # deck.json + Spiegel neu schreiben
 python3 07-DeutschCard/serve.py                 # App starten (= /karten)
 ```
 
-`deck.json.bak` ist die letzte Fassung vor dem jüngsten Schreibvorgang — falls
-etwas schiefgeht.
+`deck.json` lässt sich jederzeit mit `deck.py sync-md` neu erzeugen. Wichtig zum
+Sichern ist nur `ops.jsonl`. `deck.pre-ops.json` ist das alte Deck von vor der
+Umstellung auf das Protokoll.
 
 Erzeugt und abgefragt von `/vokabeln`, `/karten`, `/drill`, `/lesson`.

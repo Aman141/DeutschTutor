@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""serve.py — serves DeutschCard and syncs its deck to the vault.
+"""serve.py — serves DeutschCard and syncs its op log with the vault.
 
-Plain `python3 -m http.server` can only serve files, so the app's data would stay
-trapped in the browser's localStorage. This adds two endpoints that let the app
-read and write 05-Vokabeln/deck.json, which makes the link bidirectional:
+Plain `python3 -m http.server` can only serve files, so the app's changes would
+stay trapped in the browser. This adds an op endpoint that exchanges changes with
+05-Vokabeln/ops.jsonl, the log deck.py writes too (see deck.py for the op format):
 
-    GET  /api/deck   -> the deck on disk (the vault's copy wins on load)
-    POST /api/deck   -> save the deck + regenerate the Markdown mirror
+    GET  /api/ops?since=N  -> {"ops": [...], "seq": M}  ops after the first N
+    POST /api/ops          <- {"ops": [...]}            append the ones not seen yet
+
+The cursor is an op count: the log is append-only, so the first N never change.
+Sending an op twice is harmless — duplicates (by id) are dropped. Nothing here can
+overwrite or empty the deck, which is the point: the browser, the tutor's CLI and
+later the phone can each work offline and merge when they meet.
 
 Study results therefore land in the vault, where Frau Ritter can read them, and
-vocabulary mistakes she logs with deck.py show up in the app on next load.
+vocabulary mistakes she logs with deck.py show up in the app on the next sync.
 
     python3 07-DeutschCard/serve.py [--port 8080] [--no-open]
 
@@ -24,6 +29,7 @@ import sys
 import threading
 import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import deck  # noqa: E402  (same directory)
@@ -39,16 +45,29 @@ class Handler(SimpleHTTPRequestHandler):
 
     # ── endpoints ────────────────────────────────────────────────────────────
     def do_GET(self):
-        if self.path.split("?")[0] == "/api/deck":
+        path, _, query = self.path.partition("?")
+        if path == "/api/ops":
+            params = parse_qs(query)
             try:
-                words = deck.load()
+                since = int(params.get("since", ["0"])[0])
+            except ValueError:
+                return self.send_json({"error": "since must be an integer"}, 400)
+            try:
+                ops = deck.read_ops()
             except SystemExit as e:
                 return self.send_json({"error": str(e)}, 500)
-            return self.send_json(words)
+            # A cursor past the end means the log was replaced — start over.
+            if since < 0 or since > len(ops):
+                return self.send_json({"ops": ops, "seq": len(ops), "reset": True})
+            return self.send_json({"ops": ops[since:], "seq": len(ops)})
         return super().do_GET()
 
     def do_POST(self):
-        if self.path.split("?")[0] != "/api/deck":
+        path = self.path.split("?")[0]
+        if path == "/api/deck":
+            # Pre-op-log app versions posted the whole deck; that is what lost data.
+            return self.send_json({"error": "Veraltete App-Version — Seite neu laden"}, 410)
+        if path != "/api/ops":
             return self.send_error(404, "Unknown endpoint")
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -57,19 +76,23 @@ class Handler(SimpleHTTPRequestHandler):
         if length <= 0 or length > MAX_BODY:
             return self.send_json({"error": "Empty or oversized body"}, 400)
         try:
-            words = json.loads(self.rfile.read(length).decode("utf-8"))
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
             return self.send_json({"error": f"Invalid JSON: {e}"}, 400)
-        if not isinstance(words, list):
-            return self.send_json({"error": "Expected a JSON array of cards"}, 400)
-        if not all(isinstance(w, dict) and w.get("german") for w in words):
-            return self.send_json({"error": "Every card needs a 'german' field"}, 400)
-        # Refuse to blow the deck away: a bug in the browser must not empty the vault.
-        if deck.load() and not words:
-            return self.send_json({"error": "Refused: would delete all cards"}, 409)
+        ops = body.get("ops") if isinstance(body, dict) else None
+        if not isinstance(ops, list) or not all(deck.valid_op(o) for o in ops):
+            return self.send_json({"error": "Expected {ops: [...]} with id, at, op, card"}, 400)
         with WRITE_LOCK:
-            deck.save([deck.normalise(w) for w in words])
-        return self.send_json({"ok": True, "count": len(words)})
+            have = {o["id"] for o in deck.read_ops()}
+            new = []
+            for o in ops:
+                if o["id"] not in have:
+                    have.add(o["id"])
+                    new.append(o)
+            if new:
+                deck.append_ops(new)
+            seq = len(deck.read_ops())
+        return self.send_json({"ok": True, "accepted": len(new), "seq": seq})
 
     # ── helpers ──────────────────────────────────────────────────────────────
     def send_json(self, payload, status=200):
@@ -88,8 +111,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         msg = fmt % args
-        if "/api/deck" in msg and "POST" in msg:
-            print("  ↳ Deck gespeichert → 05-Vokabeln/deck.json")
+        if "/api/ops" in msg and "POST" in msg:
+            print("  ↳ Änderungen gespeichert → 05-Vokabeln/ops.jsonl")
         elif " 4" in msg or " 5" in msg:
             print(f"  ! {msg}")
 
@@ -124,11 +147,11 @@ def main():
     print(f"""
   DeutschCard   {url}
   ─────────────────────────────────────────────
-  Deck          05-Vokabeln/deck.json
+  Deck          05-Vokabeln/ops.jsonl  (deck.json wird daraus erzeugt)
   Karten        {len(words)}
   Problemkarten {len(problem)}{'  <- stehen beim Lernen vorn' if problem else ''}
 
-  Alles, was du in der App tust, landet in deck.json und damit im Vault.
+  Alles, was du in der App tust, landet im Log und damit im Vault.
   Beenden mit Strg-C.
 """)
     if not args.no_open:
