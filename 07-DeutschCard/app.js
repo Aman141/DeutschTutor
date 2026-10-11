@@ -5,12 +5,17 @@
 // from elsewhere (deck.py fail, another device) arrive by pulling after a cursor.
 // Because ops only accumulate, a device that was offline for a week merges its
 // changes without overwriting anyone else's.
+//
+// The server is whatever served this page: serve.py on the Mac (no auth) or the
+// Cloudflare relay in cloud/ (needs a device token, delivered once by a setup
+// link of the form  https://…/#token=…&device=phone  — see `deck.py device add`).
 const API = '/api/ops';
 const LEGACY_KEY = 'deutschcard_words';   // pre-op-log localStorage deck
-const PUSH_CHUNK = 500;
+const PUSH_CHUNK = 200;
 
 let db = null;              // IndexedDB handle; null = memory only (still works)
 let device = 'web';
+let token = null;           // Cloudflare relay device token; serve.py needs none
 let cursor = 0;             // ops already pulled from the server
 let opLog = [];             // every op this device knows, any order
 let knownOpIds = new Set();
@@ -50,23 +55,44 @@ async function openStore() {
     };
     db = await idbRequest(req);
     const tx = db.transaction(['ops', 'outbox', 'meta'], 'readonly');
-    const [ops, out, dev, cur] = await Promise.all([
+    const [ops, out, dev, cur, tok] = await Promise.all([
       idbRequest(tx.objectStore('ops').getAll()),
       idbRequest(tx.objectStore('outbox').getAll()),
       idbRequest(tx.objectStore('meta').get('device')),
       idbRequest(tx.objectStore('meta').get('cursor')),
+      idbRequest(tx.objectStore('meta').get('token')),
     ]);
     opLog = ops;
     outbox = new Set(out.map(x => x.id));
     cursor = cur || 0;
+    token = tok || null;
     device = dev || 'web-' + Math.random().toString(36).slice(2, 8);
     if (!dev) idbWrite('meta', s => s.put(device, 'device'));
   } catch (e) {
     console.error('IndexedDB unavailable, changes last only this session', e);
     db = null;
   }
+  readSetupLink();
   knownOpIds = new Set(opLog.map(o => o.id));
   rebuild();
+}
+
+// A setup link carries the token in the fragment, which browsers never send to
+// the server. Store it, then strip it from the address bar and history.
+function readSetupLink() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  if (!params.get('token')) return;
+  token = params.get('token');
+  idbWrite('meta', s => s.put(token, 'token'));
+  if (params.get('device')) {
+    device = params.get('device');
+    idbWrite('meta', s => s.put(device, 'device'));
+  }
+  history.replaceState(null, '', location.pathname + location.search);
+}
+
+function apiHeaders(extra = {}) {
+  return token ? { ...extra, Authorization: 'Bearer ' + token } : extra;
 }
 
 function rebuild() {
@@ -132,7 +158,7 @@ async function sync() {
       const chunk = pending.slice(i, i + PUSH_CHUNK);
       const res = await fetch(API, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ ops: chunk }),
       });
       const out = await res.json().catch(() => ({}));
@@ -140,13 +166,18 @@ async function sync() {
       chunk.forEach(o => outbox.delete(o.id));
       idbWrite('outbox', s => chunk.forEach(o => s.delete(o.id)));
     }
-    // pull: everything after our cursor, including what we just pushed
-    const res = await fetch(`${API}?since=${cursor}`, { cache: 'no-store' });
-    const out = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(out.error || 'HTTP ' + res.status);
-    changed = receive(out.ops || []);
-    cursor = out.seq;
-    idbWrite('meta', s => s.put(cursor, 'cursor'));
+    // pull: everything after our cursor, including what we just pushed; a fresh
+    // device on a long log takes several pages
+    let more = true;
+    while (more) {
+      const res = await fetch(`${API}?since=${cursor}`, { cache: 'no-store', headers: apiHeaders() });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || 'HTTP ' + res.status);
+      changed += receive(out.ops || []);
+      cursor = out.seq;
+      more = !!out.more;
+      idbWrite('meta', s => s.put(cursor, 'cursor'));
+    }
     serverReachable = true;
   } catch (e) {
     serverReachable = false;
@@ -165,16 +196,16 @@ function updateSyncBadge(error) {
   const n = outbox.size;
   let state, label, detail;
   if (error) {
-    [state, label, detail] = ['error', 'Fehler', 'Vault meldet: ' + error];
+    [state, label, detail] = ['error', 'Fehler', 'Server meldet: ' + error];
   } else if (syncing) {
     [state, label, detail] = ['saving', 'Vault', 'synchronisiere …'];
   } else if (serverReachable && !n) {
     [state, label, detail] = ['live', 'Vault', words.length + ' Karten · synchron mit dem Vault'];
   } else if (n) {
     [state, label, detail] = ['pending', n + ' offen',
-      n + ' Änderung(en) warten auf den Vault — werden gesendet, sobald serve.py erreichbar ist'];
+      n + ' Änderung(en) warten — werden gesendet, sobald der Server erreichbar ist'];
   } else {
-    [state, label, detail] = ['offline', 'Offline', 'Vault nicht erreichbar — serve.py läuft nicht'];
+    [state, label, detail] = ['offline', 'Offline', 'Server nicht erreichbar'];
   }
   el.className = 'sync-badge ' + state;
   el.textContent = label;

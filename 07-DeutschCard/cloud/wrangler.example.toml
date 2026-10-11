@@ -1,0 +1,17 @@
+# Copy to wrangler.toml (gitignored) and put your own database_id in it:
+#   npx wrangler@4 d1 create deutschcard     -> prints the database_id
+name = "deutschcard"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# The app itself, from 07-DeutschCard/. /api/* goes to the worker first;
+# .assetsignore in that directory keeps the Python tools and tests out.
+[assets]
+directory = ".."
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "deutschcard"
+database_id = "REPLACE-WITH-YOUR-DATABASE-ID"

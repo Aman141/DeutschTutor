@@ -1,3 +1,7 @@
 .DS_Store
 __pycache__/
 *.pyc
+
+# Cloudflare: account-specific config and local simulator state
+cloud/wrangler.toml
+cloud/.wrangler/

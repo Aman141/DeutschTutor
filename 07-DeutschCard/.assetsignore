@@ -1,0 +1,10 @@
+# Files in 07-DeutschCard/ that are not part of the web app (see cloud/).
+*.py
+*.md
+tests/
+cloud/
+data/
+__pycache__/
+.gitignore
+.assetsignore
+.DS_Store

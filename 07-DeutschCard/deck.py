@@ -19,6 +19,8 @@ Usage:
   deck.py due  [-n 20] [--days 3]
   deck.py stats
   deck.py sync-md            # rebuild deck.json + Markdown from the log
+  deck.py sync [--url URL --token TOKEN]   # exchange ops with the Cloudflare relay
+  deck.py device add phone   # setup link for a new device (list, revoke NAME)
   deck.py import-md          # pull hand-written :: cards from 05-Vokabeln/*.md
   deck.py import-seed        # one-time: data/seed.json -> deck
 """
@@ -30,7 +32,10 @@ import os
 import random
 import re
 import shutil
+import subprocess
 import sys
+import urllib.error
+import urllib.request
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -41,6 +46,9 @@ DECK = os.path.join(VOKABELN, "deck.json")
 OPS = os.path.join(VOKABELN, "ops.jsonl")
 DEVICE = os.environ.get("DEUTSCHCARD_DEVICE", "mac")
 OP_TYPES = ("add", "edit", "delete", "review", "fail")
+SYNC_CONF = os.path.join(VOKABELN, "sync.json")   # relay url + this Mac's token; gitignored
+PUSH_CHUNK = 200
+WRITE_CMDS = ("add", "fail", "pass", "import-md", "import-seed")
 LEVELS = {"A1", "A2", "B1", "B2", "C1"}
 KINDS = ("artikel", "plural", "bedeutung", "form", "praeposition", "rechtschreibung")
 
@@ -483,6 +491,141 @@ def cmd_import_seed(a):
     print(f"{len(added)} Karten aus seed.json übernommen · {len(words)} gesamt")
 
 
+# ── cloud sync ───────────────────────────────────────────────────────────────
+# The Cloudflare relay (cloud/) speaks the same protocol as serve.py, plus a
+# device token. sync.json remembers two positions:
+#   cursor — relay ops already pulled (the relay's seq)
+#   pushed — local log lines already sent. Lines a pull appends after that point
+#            get sent once more next time; the relay drops them by id, and in
+#            exchange there is no race with serve.py appending meanwhile.
+class SyncError(Exception):
+    pass
+
+
+def read_conf():
+    if not os.path.exists(SYNC_CONF):
+        return None
+    with open(SYNC_CONF, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_conf(conf):
+    tmp = SYNC_CONF + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(conf, f, indent=2)
+        f.write("\n")
+    os.chmod(tmp, 0o600)                          # holds a token
+    os.replace(tmp, SYNC_CONF)
+
+
+def api(conf, method, path, body=None, timeout=10):
+    req = urllib.request.Request(
+        conf["url"].rstrip("/") + path, method=method,
+        data=None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={"Authorization": f"Bearer {conf['token']}",
+                 "Content-Type": "application/json",
+                 "User-Agent": "deutschcard-deck.py"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.loads(e.read().decode("utf-8")).get("error", "")
+        except (ValueError, UnicodeDecodeError):
+            msg = ""
+        raise SyncError(f"HTTP {e.code} {msg}".strip())
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise SyncError(f"nicht erreichbar ({getattr(e, 'reason', e)})")
+
+
+def sync(conf, timeout=10):
+    """Push local ops the relay may lack, pull the ones we lack. Returns (sent, received)."""
+    load()                                        # migrate a pre-op deck.json first
+    ops = read_ops()
+    end = len(ops)
+    pending = ops[min(conf.get("pushed", 0), end):]
+    sent = 0
+    for i in range(0, len(pending), PUSH_CHUNK):
+        out = api(conf, "POST", "/api/ops", {"ops": pending[i:i + PUSH_CHUNK]}, timeout)
+        sent += out.get("accepted", 0)
+    conf["pushed"] = end
+    write_conf(conf)
+
+    have = {o.get("id") for o in ops}
+    new, cursor, more = [], conf.get("cursor", 0), True
+    while more:
+        out = api(conf, "GET", f"/api/ops?since={cursor}", timeout=timeout)
+        if out.get("reset"):
+            conf["pushed"] = 0                    # relay was replaced: resend everything next time
+        for o in out.get("ops", []):
+            if valid_op(o) and o["id"] not in have:
+                have.add(o["id"])
+                new.append(o)
+        cursor, more = out["seq"], out.get("more", False)
+    if new:
+        append_ops(new)
+    conf["cursor"] = cursor
+    write_conf(conf)
+    return sent, len(new)
+
+
+def auto_sync(when):
+    """Best effort around ordinary commands; offline is normal, never an error."""
+    conf = read_conf()
+    if not conf or os.environ.get("DEUTSCHCARD_OFFLINE"):
+        return
+    try:
+        sent, received = sync(conf, timeout=5)
+    except SyncError as e:
+        print(f"(Sync {when} übersprungen: {e})", file=sys.stderr)
+        return
+    if received:
+        print(f"↓ {received} Änderung(en) von anderen Geräten übernommen", file=sys.stderr)
+
+
+def cmd_sync(a):
+    conf = read_conf() or {}
+    if a.url or a.token:
+        if not (a.url and a.token) and not conf:
+            sys.exit("Beim ersten Mal --url und --token angeben.")
+        if a.url and a.url.rstrip("/") != conf.get("url", "").rstrip("/"):
+            conf = {"url": a.url.rstrip("/")}     # another relay: start both positions over
+        if a.token:
+            conf["token"] = a.token
+        write_conf(conf)
+    if not conf.get("url"):
+        sys.exit("Kein Relay eingerichtet. Siehe 07-DeutschCard/cloud/README.md.")
+    try:
+        sent, received = sync(conf)
+    except SyncError as e:
+        sys.exit(f"Sync fehlgeschlagen: {e}")
+    print(f"↑ {sent} gesendet · ↓ {received} empfangen · {len(load())} Karten · {conf['url']}")
+
+
+def cmd_device(a):
+    conf = read_conf()
+    if not conf:
+        sys.exit("Kein Relay eingerichtet. Siehe 07-DeutschCard/cloud/README.md.")
+    try:
+        if a.action == "list":
+            for d in api(conf, "GET", "/api/devices")["devices"]:
+                role = "admin" if d["admin"] else "     "
+                print(f"  {d['name']:<16} {role}  zuletzt: {d['last_seen'] or '—'}")
+        elif a.action == "revoke":
+            api(conf, "DELETE", f"/api/devices/{a.name}")
+            print(f"Gerät '{a.name}' entfernt — sein Token gilt nicht mehr.")
+        elif a.action == "add":
+            out = api(conf, "POST", "/api/devices", {"name": a.name})
+            link = f"{conf['url']}/#token={out['token']}&device={out['name']}"
+            print(f"Gerät '{out['name']}' angelegt. Diesen Link einmal auf dem Gerät öffnen:\n\n  {link}\n")
+            if shutil.which("qrencode"):
+                subprocess.run(["qrencode", "-t", "ansiutf8", link])
+            print("Der Link ist ein Passwort: nicht teilen. Verloren? "
+                  f"'deck.py device revoke {out['name']}' und neu anlegen.")
+    except SyncError as e:
+        sys.exit(f"Relay: {e}")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -529,8 +672,26 @@ def main():
         s = sub.add_parser(name, help=helptext)
         s.set_defaults(func=fn)
 
+    y = sub.add_parser("sync", help="mit dem Cloudflare-Relay abgleichen")
+    y.add_argument("--url", help="Relay-Adresse, z.B. https://deutschcard.NAME.workers.dev")
+    y.add_argument("--token", help="Token dieses Macs (cloud/bootstrap.py erzeugt ihn)")
+    y.set_defaults(func=cmd_sync)
+
+    v = sub.add_parser("device", help="Geräte für das Relay verwalten")
+    v.add_argument("action", choices=["add", "list", "revoke"])
+    v.add_argument("name", nargs="?", help="z.B. phone")
+    v.set_defaults(func=cmd_device)
+
     args = p.parse_args()
+    if args.cmd == "device" and args.action != "list" and not args.name:
+        p.error("device add/revoke braucht einen Namen")
+    # Pull before reading (the phone may have studied), push after writing (so
+    # the phone sees a lesson mistake at once). sync.json absent -> no-op.
+    if args.cmd not in ("sync", "device", "sync-md"):
+        auto_sync("vorher")
     args.func(args)
+    if args.cmd in WRITE_CMDS:
+        auto_sync("nachher")
 
 
 if __name__ == "__main__":

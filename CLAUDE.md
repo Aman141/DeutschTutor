@@ -85,7 +85,9 @@ per `deck.py`, von mir in der App in [07-DeutschCard/](07-DeutschCard/)) wird do
 angehängt, nie überschrieben. Daraus erzeugt: **[05-Vokabeln/deck.json](05-Vokabeln/deck.json)**
 (lesen erlaubt, jederzeit aktuell) und die `.md`-Dateien als Spiegel für Obsidian.
 **Schreib in keine dieser Dateien direkt** — Änderungen nur über `deck.py`, sonst
-gehen sie beim nächsten Schreibvorgang verloren.
+gehen sie beim nächsten Schreibvorgang verloren. Ist das Cloud-Relay eingerichtet,
+gleicht `deck.py` bei jedem Aufruf selbst ab: was ich auf dem Handy gelernt habe,
+ist vor `hard`/`due`/`stats` schon da, und ein `fail` ist sofort auf dem Handy.
 
 **Neues Wort anlegen:**
 ```bash

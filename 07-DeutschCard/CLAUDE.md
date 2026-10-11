@@ -25,6 +25,11 @@ python3 serve.py            # from anywhere: python3 07-DeutschCard/serve.py
 - `POST /api/ops` — `{ops: [...]}`: append the ones whose id is new, regenerate
   `deck.json` and the Markdown mirror
 
+The Cloudflare relay in `cloud/` speaks the same protocol (plus a bearer token per
+device, and `more` for paging), so the app is identical on both: it talks to
+whatever origin served it. See `cloud/README.md`. `deck.py` syncs with the relay
+around every command when `../05-Vokabeln/sync.json` exists.
+
 `POST /api/deck` (the old whole-deck overwrite) answers 410 so a stale cached page
 fails loudly instead of clobbering the vault. With plain `python3 -m http.server`
 nothing reaches the vault; ops wait in the browser's outbox until `serve.py` runs.
