@@ -37,6 +37,7 @@ def main():
     p.add_argument("--persist-to", default=LOCAL_STATE, help="with --local: wrangler dev state dir")
     a = p.parse_args()
 
+    url = deck.check_relay_url(a.url)
     if deck.read_conf():
         sys.exit(f"{deck.SYNC_CONF} existiert schon. Erst entfernen, wenn du wirklich neu anfangen willst.")
     if not os.path.exists(os.path.join(CLOUD, "wrangler.toml")):
@@ -57,7 +58,7 @@ def main():
     if r.returncode != 0:
         sys.exit(f"wrangler fehlgeschlagen:\n{r.stdout}\n{r.stderr}")
 
-    deck.write_conf({"url": a.url.rstrip("/"), "token": token})
+    deck.write_conf({"url": url, "token": token})
     print(f"Admin-Gerät '{a.name}' angelegt, Token in {os.path.relpath(deck.SYNC_CONF)}.")
     print("Nächster Schritt: python3 07-DeutschCard/deck.py sync   (lädt das Deck hoch)")
 

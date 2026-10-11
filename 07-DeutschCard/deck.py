@@ -27,7 +27,7 @@ Usage:
 """
 
 import argparse
-import copy
+import fcntl
 import json
 import os
 import random
@@ -35,9 +35,12 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -82,43 +85,109 @@ def make_op(op_type, card, at=None, **payload):
             "op": op_type, "card": card, **payload}
 
 
+PRINTABLE = re.compile(r"[\x21-\x7e]+")      # ASCII: sorts the same in JS and Python
+MAX_MISTAKES = 1000
+
+
+def _printable(v, n):
+    return isinstance(v, str) and len(v) <= n and PRINTABLE.fullmatch(v) is not None
+
+
 def valid_op(o):
-    return (isinstance(o, dict) and isinstance(o.get("id"), str) and o["id"]
-            and isinstance(o.get("at"), str) and isinstance(o.get("card"), str)
-            and o["card"] and isinstance(o.get("op"), str))
+    return (isinstance(o, dict) and _printable(o.get("id"), 64) and _printable(o.get("at"), 40)
+            and _printable(o.get("card"), 64) and isinstance(o.get("op"), str))
+
+
+# serve.py and this CLI are separate processes appending to the same file, so
+# threading.Lock is not enough: an flock on ops.jsonl.lock serialises appends
+# (exclusive) against reads (shared). Re-entrant per thread, because
+# append_ops() reads the log again while it holds the lock.
+_lock_depth = threading.local()
+
+
+@contextmanager
+def log_lock(exclusive):
+    if getattr(_lock_depth, "n", 0):
+        _lock_depth.n += 1
+        try:
+            yield
+        finally:
+            _lock_depth.n -= 1
+        return
+    os.makedirs(VOKABELN, exist_ok=True)
+    with open(OPS + ".lock", "a") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        _lock_depth.n = 1
+        try:
+            yield
+        finally:
+            _lock_depth.n = 0
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+def _no_constants(name):
+    raise ValueError(f"{name} is not JSON")      # NaN/Infinity: Python accepts, browsers don't
+
+
+def parse_json(text):
+    return json.loads(text, parse_constant=_no_constants)
 
 
 def read_ops():
+    """All parseable ops. A broken line is skipped with a warning, never fatal:
+    one bad line must not lock every device out of the deck."""
     if not os.path.exists(OPS):
         return []
     ops = []
-    with open(OPS, encoding="utf-8") as f:
+    with log_lock(exclusive=False), open(OPS, encoding="utf-8") as f:
         for n, line in enumerate(f, 1):
             if not line.strip():
                 continue
             try:
-                ops.append(json.loads(line))
-            except json.JSONDecodeError as e:
-                sys.exit(f"ops.jsonl Zeile {n} ist beschädigt ({e}).")
+                ops.append(parse_json(line))
+            except ValueError as e:
+                print(f"ops.jsonl Zeile {n} übersprungen (beschädigt: {e})", file=sys.stderr)
     return ops
 
 
 def append_ops(new):
     """Append ops to the log and regenerate deck.json + Markdown. Returns the deck."""
-    os.makedirs(VOKABELN, exist_ok=True)
-    with open(OPS, "a", encoding="utf-8") as f:
-        for o in new:
-            f.write(json.dumps(o, ensure_ascii=False) + "\n")
-    words = replay(read_ops())
-    save(words)
+    data = "".join(json.dumps(o, ensure_ascii=False, allow_nan=False) + "\n" for o in new)
+    with log_lock(exclusive=True):
+        with open(OPS, "a", encoding="utf-8") as f:
+            f.write(data)
+        words = replay(read_ops())
+        save(words)
     return words
 
 
+def coerce(k, v):
+    """Give every field the type of its default — one garbled op in the shared
+    log must not crash or split the devices. Mirrors coerce() in ops.js."""
+    d = FIELDS[k]
+    if isinstance(d, list):
+        return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
+    if isinstance(d, bool):                       # before int: bool is an int in Python
+        return v is True
+    if isinstance(d, str):
+        return v if isinstance(v, str) else d
+    if isinstance(d, int):
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return 0
+        if isinstance(v, float):
+            if not v.is_integer():                # also NaN and inf
+                return 0
+            v = int(v)
+        return min(3, max(0, v)) if k == "difficulty" else min(MAX_MISTAKES, max(0, v))
+    return v if isinstance(v, str) else None      # lastSeen, added
+
+
+def _str(v):
+    return v if isinstance(v, str) and v else None
+
+
 def card_from(data, op):
-    out = {}
-    for k, default in FIELDS.items():
-        v = data.get(k)
-        out[k] = copy.deepcopy(default) if v is None else copy.deepcopy(v)
+    out = {k: coerce(k, data.get(k)) for k in FIELDS}
     out["id"] = op["card"]
     out["added"] = out["added"] or op["at"][:10]
     return out
@@ -127,37 +196,38 @@ def card_from(data, op):
 def apply_op(state, o):
     cards, order, deleted = state["cards"], state["order"], state["deleted"]
     cid, kind = o["card"], o["op"]
+    data = o.get("data") if isinstance(o.get("data"), dict) else {}
     if kind == "add":
         if cid not in cards and cid not in deleted:
-            cards[cid] = card_from(o.get("data") or {}, o)
+            cards[cid] = card_from(data, o)
             order.append(cid)
         return
     w = cards.get(cid)
     if w is None:
         return
     if kind == "edit":
-        for k, v in (o.get("data") or {}).items():
+        for k, v in data.items():
             if k in FIELDS and k != "id":
-                w[k] = copy.deepcopy(v)
+                w[k] = coerce(k, v)
     elif kind == "delete":
         del cards[cid]
         order.remove(cid)
         deleted.add(cid)
     elif kind == "review":
-        w["known"] = bool(o.get("known"))
-        d = w["difficulty"] or 0
+        w["known"] = o.get("known") is True
+        d = w["difficulty"]
         w["difficulty"] = max(0, d - 1) if w["known"] else min(3, d + 1)
-        w["lastSeen"] = o.get("date") or o["at"][:10]
+        w["lastSeen"] = _str(o.get("date")) or o["at"][:10]
     elif kind == "fail":
-        w["mistakes"] = (w["mistakes"] or 0) + 1
+        w["mistakes"] = min(MAX_MISTAKES, w["mistakes"] + 1)
         w["known"] = False
         w["difficulty"] = 3
-        w["lastSeen"] = o.get("date") or o["at"][:10]
-        if o.get("kind") and o["kind"] not in w["mistakeKinds"]:
+        w["lastSeen"] = _str(o.get("date")) or o["at"][:10]
+        if _str(o.get("kind")) and o["kind"] not in w["mistakeKinds"]:
             w["mistakeKinds"].append(o["kind"])
-        if o.get("tag") and o["tag"] not in w["fehlerTags"]:
+        if _str(o.get("tag")) and o["tag"] not in w["fehlerTags"]:
             w["fehlerTags"].append(o["tag"])
-        if o.get("source"):
+        if _str(o.get("source")):
             w["source"] = o["source"]
 
 
@@ -180,6 +250,12 @@ def migrate_legacy():
     """
     if os.path.exists(OPS) or not os.path.exists(DECK):
         return
+    with log_lock(exclusive=True):
+        if not os.path.exists(OPS):               # another process may have won
+            _migrate_legacy()
+
+
+def _migrate_legacy():
     with open(DECK, encoding="utf-8") as f:
         try:
             old = json.load(f)
@@ -195,6 +271,10 @@ def migrate_legacy():
         at = (base + timedelta(milliseconds=i)).isoformat(timespec="milliseconds")
         ops.append(make_op("add", w["id"], at=at.replace("+00:00", "Z"), data=w))
     append_ops(ops)
+    conf = read_conf()
+    if conf:                                      # a new log: both sync positions start over
+        conf.update(pushed=0, cursor=0, epoch=None)
+        write_conf(conf)
     print(f"deck.json → ops.jsonl migriert ({len(ops)} Karten). "
           "Alte Datei: 05-Vokabeln/deck.pre-ops.json", file=sys.stderr)
 
@@ -218,11 +298,11 @@ def normalise(w):
 
 
 def save(words, sync_md=True):
-    """Write the generated views of the log. Only append_ops() should call this."""
+    """Write the generated views of the log. Call with log_lock held (append_ops does)."""
     os.makedirs(VOKABELN, exist_ok=True)
     if os.path.exists(DECK):                      # keep one generation of backup
         os.replace(DECK, DECK + ".bak")
-    tmp = DECK + ".tmp"
+    tmp = f"{DECK}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(words, f, ensure_ascii=False, indent=2)
         f.write("\n")
@@ -492,18 +572,27 @@ def cmd_activity(a):
     for o in read_ops():
         if not valid_op(o) or o["op"] not in ("review", "fail"):
             continue
-        day = o.get("date") or o["at"][:10]
+        day = _str(o.get("date")) or o["at"][:10]
         if day < since:
             continue
         if o["op"] == "fail":
             fails += 1
             continue
-        d = days.setdefault((day, o.get("device", "?")), {"ats": [], "cards": set(), "known": 0})
-        d["ats"].append(parse_at(o["at"]))
+        device = _str(o.get("device")) or "?"
+        if device == DEVICE:                      # deck.py pass: the tutor's drill, not the app
+            continue
+        try:
+            at = parse_at(o["at"])
+        except ValueError:
+            continue
+        d = days.setdefault((day, device), {"ats": [], "cards": set(), "known": 0})
+        d["ats"].append(at)
         d["cards"].add(o["card"])
-        d["known"] += 1 if o.get("known") else 0
+        d["known"] += 1 if o.get("known") is True else 0
     if not days:
         print(f"Keine App-Wiederholungen in den letzten {a.days} Tagen.")
+        if fails:
+            print(f"Im Unterricht protokollierte Fehler (deck.py fail): {fails}")
         return
     print(f"App-Aktivität — letzte {a.days} Tage\n")
     print(f"  {'Datum':<11} {'Gerät':<10} {'Wdh.':>5} {'gewusst':>8} {'nicht':>6} {'≈ Min':>6}")
@@ -528,9 +617,10 @@ def cmd_activity(a):
 
 
 def cmd_sync_md(a):
-    words = load()
-    save(words, sync_md=False)
-    files = write_markdown(words)
+    with log_lock(exclusive=True):
+        words = load()
+        save(words, sync_md=False)
+        files = write_markdown(words)
     print(f"{len(words)} Karten → {len(files)} Datei(en) in 05-Vokabeln/")
     for f in sorted(files):
         print(f"  {f}")
@@ -555,6 +645,8 @@ def cmd_import_seed(a):
 #   pushed — local log lines already sent. Lines a pull appends after that point
 #            get sent once more next time; the relay drops them by id, and in
 #            exchange there is no race with serve.py appending meanwhile.
+#   epoch  — id of the relay's first op. A different one means the relay's log
+#            was replaced: pull from 0 and push everything again.
 class SyncError(Exception):
     pass
 
@@ -568,11 +660,21 @@ def read_conf():
 
 def write_conf(conf):
     tmp = SYNC_CONF + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    # holds a token: owner-only from the first byte, not chmod-ed afterwards
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)                          # an older .tmp keeps its old mode otherwise
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(conf, f, indent=2)
         f.write("\n")
-    os.chmod(tmp, 0o600)                          # holds a token
     os.replace(tmp, SYNC_CONF)
+
+
+def check_relay_url(url):
+    """Tokens travel in a header: plain http is only acceptable to this machine."""
+    host = urllib.parse.urlsplit(url).hostname or ""
+    if url.startswith("https://") or (url.startswith("http://") and host in ("localhost", "127.0.0.1")):
+        return url.rstrip("/")
+    sys.exit(f"Relay-Adresse muss mit https:// beginnen (http nur für localhost): {url}")
 
 
 def api(conf, method, path, body=None, timeout=10):
@@ -584,46 +686,71 @@ def api(conf, method, path, body=None, timeout=10):
                  "User-Agent": "deutschcard-deck.py"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
+            return parse_json(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         try:
             msg = json.loads(e.read().decode("utf-8")).get("error", "")
         except (ValueError, UnicodeDecodeError):
             msg = ""
         raise SyncError(f"HTTP {e.code} {msg}".strip())
+    except (ValueError, UnicodeDecodeError) as e:
+        raise SyncError(f"Antwort ist kein JSON ({e})")
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise SyncError(f"nicht erreichbar ({getattr(e, 'reason', e)})")
 
 
-def sync(conf, timeout=10):
-    """Push local ops the relay may lack, pull the ones we lack. Returns (sent, received)."""
-    load()                                        # migrate a pre-op deck.json first
+def _push(conf, timeout):
     ops = read_ops()
     end = len(ops)
     pending = ops[min(conf.get("pushed", 0), end):]
     sent = 0
     for i in range(0, len(pending), PUSH_CHUNK):
         out = api(conf, "POST", "/api/ops", {"ops": pending[i:i + PUSH_CHUNK]}, timeout)
+        if out.get("ok") is not True:
+            raise SyncError(f"Relay hat nicht bestätigt: {out}")
         sent += out.get("accepted", 0)
     conf["pushed"] = end
     write_conf(conf)
+    return sent
 
-    have = {o.get("id") for o in ops}
-    new, cursor, more = [], conf.get("cursor", 0), True
+
+def _pull(conf, timeout):
+    """Returns (received, restarted). `epoch` is the id of the relay's first op:
+    if it changes, the relay's log was replaced and our cursor means nothing."""
+    have = {o.get("id") for o in read_ops()}
+    new, cursor, more, restarted = [], conf.get("cursor", 0), True, False
     while more:
         out = api(conf, "GET", f"/api/ops?since={cursor}", timeout=timeout)
-        if out.get("reset"):
-            conf["pushed"] = 0                    # relay was replaced: resend everything next time
-        for o in out.get("ops", []):
+        if not isinstance(out.get("ops"), list) or not isinstance(out.get("seq"), int):
+            raise SyncError("unerwartete Antwort vom Relay")
+        epoch_changed = conf.get("epoch") and out.get("epoch") and out["epoch"] != conf["epoch"]
+        if (out.get("reset") or epoch_changed) and not restarted:
+            restarted = True
+            conf["pushed"] = 0                    # offer the new log everything we hold
+            if epoch_changed:
+                cursor = 0
+                continue
+        for o in out["ops"]:
             if valid_op(o) and o["id"] not in have:
                 have.add(o["id"])
                 new.append(o)
         cursor, more = out["seq"], out.get("more", False)
+        conf["epoch"] = out.get("epoch")
     if new:
         append_ops(new)
     conf["cursor"] = cursor
     write_conf(conf)
-    return sent, len(new)
+    return len(new), restarted
+
+
+def sync(conf, timeout=10):
+    """Push local ops the relay may lack, pull the ones we lack. Returns (sent, received)."""
+    load()                                        # migrate a pre-op deck.json first
+    sent = _push(conf, timeout)
+    received, restarted = _pull(conf, timeout)
+    if restarted:
+        sent += _push(conf, timeout)
+    return sent, received
 
 
 def auto_sync(when):
@@ -645,7 +772,7 @@ def cmd_sync(a):
     if a.url or a.token:
         if not (a.url and a.token) and not conf:
             sys.exit("Beim ersten Mal --url und --token angeben.")
-        if a.url and a.url.rstrip("/") != conf.get("url", "").rstrip("/"):
+        if a.url and check_relay_url(a.url) != conf.get("url", "").rstrip("/"):
             conf = {"url": a.url.rstrip("/")}     # another relay: start both positions over
         if a.token:
             conf["token"] = a.token
@@ -735,7 +862,8 @@ def main():
 
     y = sub.add_parser("sync", help="mit dem Cloudflare-Relay abgleichen")
     y.add_argument("--url", help="Relay-Adresse, z.B. https://deutschcard.NAME.workers.dev")
-    y.add_argument("--token", help="Token dieses Macs (cloud/bootstrap.py erzeugt ihn)")
+    y.add_argument("--token", help="Token dieses Macs — normalerweise schreibt cloud/bootstrap.py "
+                                   "ihn selbst; hier angegeben landet er in der Shell-History")
     y.set_defaults(func=cmd_sync)
 
     v = sub.add_parser("device", help="Geräte für das Relay verwalten")

@@ -19,12 +19,14 @@ const json = (payload, status = 200) => new Response(JSON.stringify(payload), {
   headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
 });
 
-// Same check as validOp() in ops.js and valid_op() in deck.py.
+// Same check as validOp() in ops.js and valid_op() in deck.py — keep all three
+// identical, or a client will push ops the relay refuses forever.
+const PRINTABLE = /^[\x21-\x7e]+$/;
 function validOp(o) {
-  return !!o && typeof o === 'object' && !Array.isArray(o) &&
-    typeof o.id === 'string' && o.id !== '' && o.id.length <= 64 &&
-    typeof o.at === 'string' &&
-    typeof o.card === 'string' && o.card !== '' &&
+  return o !== null && typeof o === 'object' && !Array.isArray(o) &&
+    typeof o.id === 'string' && o.id.length <= 64 && PRINTABLE.test(o.id) &&
+    typeof o.at === 'string' && o.at.length <= 40 && PRINTABLE.test(o.at) &&
+    typeof o.card === 'string' && o.card.length <= 64 && PRINTABLE.test(o.card) &&
     typeof o.op === 'string';
 }
 
@@ -62,24 +64,31 @@ async function getOps(url, env) {
   if (since < 0 || since > await maxSeq(env)) { since = 0; reset = true; }  // log was replaced
   const { results } = await env.DB.prepare(
     'SELECT seq, body FROM ops WHERE seq > ? ORDER BY seq LIMIT ?').bind(since, PAGE).all();
+  // epoch = id of the first op: a client whose stored epoch differs knows the
+  // database was replaced, even if it is already longer than its cursor.
+  const first = await env.DB.prepare('SELECT id FROM ops ORDER BY seq LIMIT 1').first();
   const out = {
     ops: results.map(r => JSON.parse(r.body)),
     seq: results.length ? results[results.length - 1].seq : since,
     more: results.length === PAGE,
+    epoch: first ? first.id : null,
   };
   if (reset) out.reset = true;
   return json(out);
 }
 
 async function postOps(request, env, device) {
+  const declared = Number(request.headers.get('Content-Length') || 0);
+  if (declared > MAX_BODY) return json({ error: 'Empty or oversized body' }, 413);
   const text = await request.text();
   if (!text || text.length > MAX_BODY) return json({ error: 'Empty or oversized body' }, 400);
   let body;
   try { body = JSON.parse(text); } catch (e) { return json({ error: 'Invalid JSON' }, 400); }
-  const ops = body && body.ops;
-  if (!Array.isArray(ops) || !ops.every(validOp)) {
-    return json({ error: 'Expected {ops: [...]} with id, at, op, card' }, 400);
-  }
+  if (!body || !Array.isArray(body.ops)) return json({ error: 'Expected {ops: [...]}' }, 400);
+  // Invalid ops are dropped, not refused: refusing the batch would make the
+  // client retry the same chunk forever and stall its whole outbox.
+  const ops = body.ops.filter(validOp);
+  const rejected = body.ops.length - ops.length;
   // One statement per chunk: json_each unpacks the array inside SQLite, so a push
   // of hundreds of ops is a handful of queries, not hundreds.
   const now = new Date().toISOString();
@@ -92,7 +101,7 @@ async function postOps(request, env, device) {
   }
   const results = stmts.length ? await env.DB.batch(stmts) : [];
   const accepted = results.reduce((n, r) => n + (r.meta.changes || 0), 0);
-  return json({ ok: true, accepted, seq: await maxSeq(env) });
+  return json({ ok: true, accepted, rejected, seq: await maxSeq(env) });
 }
 
 async function devices(request, env, url) {
@@ -145,7 +154,8 @@ export default {
       }
       return json({ error: 'Not found' }, 404);
     } catch (e) {
-      return json({ error: String((e && e.message) || e) }, 500);
+      console.error(e);                     // details in `wrangler tail`, not in the response
+      return json({ error: 'Interner Fehler' }, 500);
     }
   },
 };

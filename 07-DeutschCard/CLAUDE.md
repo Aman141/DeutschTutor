@@ -137,6 +137,24 @@ queue by it, so words the user actually got wrong in conversation surface first.
   concurrent edit of another field elsewhere. Keep it that way.
 - `id`, `at` and `card` are what replay depends on. Never rewrite or delete lines
   in `ops.jsonl`; correct a mistake with a new op.
+- **The log is shared, so replay must survive any op.** `validOp` requires printable
+  ASCII `id`/`at`/`card` (identical sort order in JS and Python), and `coerce()`
+  gives every field its default's type — a garbled op degrades to defaults instead
+  of crashing or splitting devices. `validOp` exists four times (`ops.js`,
+  `deck.py`, `cloud/worker.js`, and via `deck.py` in `serve.py`): keep them
+  identical. Servers *drop* invalid ops rather than refusing the batch, because a
+  refused batch would be retried forever and stall the outbox.
+- **Two processes append to `ops.jsonl`** (`serve.py` and the CLI). All access goes
+  through `log_lock()` in `deck.py` (an flock on `ops.jsonl.lock`); never open the
+  log directly.
+- **Every GET carries an `epoch`** — the id of the log's first op. A client whose
+  stored epoch differs treats the server's log as replaced: pulls from 0 and pushes
+  everything it holds. Only an explicit `{ok: true}` clears the outbox (a captive
+  portal also answers 200).
+- Card fields come from other devices: anything put into `innerHTML` goes through
+  `esc()`.
+- `serve.py` only answers requests whose `Host` (and `Origin`, if sent) is itself and
+  requires JSON for writes — otherwise any website could post ops to localhost.
 - Study order is deliberate, not incidental. `initStudy()` sorts by
   `mistakes → difficulty → unknown → least recently seen`. Shuffle is opt-in.
 - `deck.py hard` means *evidence of difficulty* — `mistakes > 0` or `difficulty >= 2`

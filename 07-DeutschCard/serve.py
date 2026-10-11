@@ -46,9 +46,38 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=APP_DIR, **kw)
 
+    # ── who may talk to us ───────────────────────────────────────────────────
+    # Binding to 127.0.0.1 is not enough: any website the learner has open can
+    # POST to localhost (a text/plain no-cors request needs no preflight), and a
+    # DNS-rebinding page can even read responses. Ops written that way would
+    # sync to every device. So: the Host header must be this server, writes must
+    # be JSON (which forces a CORS preflight we never answer), and a browser
+    # Origin, when sent, must be this server too.
+    def allowed_hosts(self):
+        port = self.server.server_address[1]
+        return {f"localhost:{port}", f"127.0.0.1:{port}"}
+
+    def check_request(self, write=False):
+        if (self.headers.get("Host") or "") not in self.allowed_hosts():
+            self.send_json({"error": "Host not allowed"}, 403)
+            return False
+        origin = self.headers.get("Origin")
+        if origin is not None and origin.removeprefix("http://") not in self.allowed_hosts():
+            self.send_json({"error": "Origin not allowed"}, 403)
+            return False
+        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if write and ctype != "application/json":
+            self.send_json({"error": "Content-Type must be application/json"}, 415)
+            return False
+        return True
+
     # ── endpoints ────────────────────────────────────────────────────────────
     def do_GET(self):
+        if not self.check_request():
+            return
         path, _, query = self.path.partition("?")
+        if path.startswith(("/cloud/", "/tests/")) or path.endswith(".py"):
+            return self.send_error(404)        # tooling, not the app
         if path == "/api/ops":
             params = parse_qs(query)
             try:
@@ -59,13 +88,17 @@ class Handler(SimpleHTTPRequestHandler):
                 ops = deck.read_ops()
             except SystemExit as e:
                 return self.send_json({"error": str(e)}, 500)
-            # A cursor past the end means the log was replaced — start over.
+            # epoch = first op's id: clients compare it to notice a replaced log
+            # even when it is already longer than their cursor.
+            epoch = ops[0].get("id") if ops else None
             if since < 0 or since > len(ops):
-                return self.send_json({"ops": ops, "seq": len(ops), "reset": True})
-            return self.send_json({"ops": ops[since:], "seq": len(ops)})
+                return self.send_json({"ops": ops, "seq": len(ops), "epoch": epoch, "reset": True})
+            return self.send_json({"ops": ops[since:], "seq": len(ops), "epoch": epoch})
         return super().do_GET()
 
     def do_POST(self):
+        if not self.check_request(write=True):
+            return
         path = self.path.split("?")[0]
         if path == "/api/deck":
             # Pre-op-log app versions posted the whole deck; that is what lost data.
@@ -79,12 +112,17 @@ class Handler(SimpleHTTPRequestHandler):
         if length <= 0 or length > MAX_BODY:
             return self.send_json({"error": "Empty or oversized body"}, 400)
         try:
-            body = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            body = deck.parse_json(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as e:
             return self.send_json({"error": f"Invalid JSON: {e}"}, 400)
         ops = body.get("ops") if isinstance(body, dict) else None
-        if not isinstance(ops, list) or not all(deck.valid_op(o) for o in ops):
-            return self.send_json({"error": "Expected {ops: [...]} with id, at, op, card"}, 400)
+        if not isinstance(ops, list):
+            return self.send_json({"error": "Expected {ops: [...]}"}, 400)
+        # Invalid ops are dropped, not refused — refusing the batch would make the
+        # app retry the same chunk forever and stall its outbox. Same as the relay.
+        valid = [o for o in ops if deck.valid_op(o)]
+        rejected = len(ops) - len(valid)
+        ops = valid
         with WRITE_LOCK:
             have = {o["id"] for o in deck.read_ops()}
             new = []
@@ -95,11 +133,11 @@ class Handler(SimpleHTTPRequestHandler):
             if new:
                 deck.append_ops(new)
             seq = len(deck.read_ops())
-        return self.send_json({"ok": True, "accepted": len(new), "seq": seq})
+        return self.send_json({"ok": True, "accepted": len(new), "rejected": rejected, "seq": seq})
 
     # ── helpers ──────────────────────────────────────────────────────────────
     def send_json(self, payload, status=200):
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        body = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

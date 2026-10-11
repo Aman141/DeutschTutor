@@ -18,8 +18,8 @@ a device token:
 
 | Endpoint | |
 |---|---|
-| `GET /api/ops?since=N` | `{ops, seq, more}`: ops with seq > N; keep pulling while `more` |
-| `POST /api/ops` | `{ops: [...]}`: inserts the ops whose id is new |
+| `GET /api/ops?since=N` | `{ops, seq, more, epoch}`: ops with seq > N; keep pulling while `more`. `epoch` is the first op's id; a change means the log was replaced |
+| `POST /api/ops` | `{ops: [...]}` → `{ok, accepted, rejected, seq}`: inserts the ops whose id is new; invalid ops are dropped (`rejected`), never the whole batch |
 | `GET / POST /api/devices`, `DELETE /api/devices/NAME` | device management (admin token only) |
 
 Every `/api` request needs `Authorization: Bearer <token>`. The database stores

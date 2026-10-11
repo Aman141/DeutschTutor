@@ -29,7 +29,11 @@ self.addEventListener('fetch', event => {
   const req = event.request;
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
-  // every page load is the one-page app: cache it under './' whatever the URL
+  // The app is the page at the scope root. Any other page opened directly (an
+  // icon, a JSON file) is left to the browser — cached as './' it would replace
+  // the app and the next offline start would show a PNG.
+  const root = new URL('./', location.href).pathname;
+  if (req.mode === 'navigate' && url.pathname !== root && url.pathname !== root + 'index.html') return;
   const key = req.mode === 'navigate' ? new URL('./', location.href).href : url.href.split('#')[0];
   event.respondWith(networkFirst(req, key));
 });

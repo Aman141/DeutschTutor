@@ -1,0 +1,17 @@
+[
+  {"id": "c-str", "german": "", "gender": "", "plural": "", "english": "", "example": "", "tags": [],
+   "known": false, "difficulty": 0, "lastSeen": null, "forms": "", "prep": "", "mistakes": 0,
+   "mistakeKinds": [], "fehlerTags": [], "source": "", "added": "2026-10-01"},
+  {"id": "c-num", "german": "Zahl", "gender": "", "plural": "", "english": "", "example": "", "tags": ["A1"],
+   "known": false, "difficulty": 3, "lastSeen": "2026-10-03", "forms": "", "prep": "", "mistakes": 1,
+   "mistakeKinds": [], "fehlerTags": [], "source": "", "added": "2026-10-01"},
+  {"id": "c-clamp", "german": "Klemme", "gender": "", "plural": "", "english": "", "example": "", "tags": [],
+   "known": false, "difficulty": 3, "lastSeen": "2026-10-04", "forms": "", "prep": "", "mistakes": 1000,
+   "mistakeKinds": ["artikel"], "fehlerTags": [], "source": "", "added": "2026-10-01"},
+  {"id": "c-float", "german": "Komma", "gender": "", "plural": "", "english": "", "example": "", "tags": [],
+   "known": false, "difficulty": 0, "lastSeen": null, "forms": "", "prep": "", "mistakes": 0,
+   "mistakeKinds": [], "fehlerTags": [], "source": "", "added": "2026-10-01"},
+  {"id": "c-neg", "german": "Minus", "gender": "", "plural": "", "english": "", "example": "", "tags": [],
+   "known": false, "difficulty": 0, "lastSeen": null, "forms": "", "prep": "", "mistakes": 0,
+   "mistakeKinds": [], "fehlerTags": [], "source": "", "added": "2026-10-01"}
+]

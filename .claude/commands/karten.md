@@ -44,8 +44,9 @@ python3 -c "import json; print(json.load(open('05-Vokabeln/sync.json'))['url'])"
 **Lies `sync.json` nie ganz und gib nie den `token` aus** — er ist das Passwort des
 Macs für das Relay. Ein neuer Browser oder ein neues Handy braucht ein eigenes Gerät:
 `python3 07-DeutschCard/deck.py device add NAME` erzeugt den Einrichtungslink. Schreib
-ihn in eine Datei statt in den Chat (`… | grep -o 'https://[^ ]*' > 05-Vokabeln/NAME-link.txt`)
-und sag mir, dass ich die Datei nach dem Öffnen löschen soll.
+ihn in eine Datei statt in den Chat, lesbar nur für mich:
+`(umask 077; python3 07-DeutschCard/deck.py device add NAME | grep -o 'https://[^ ]*' > 05-Vokabeln/NAME-link.txt)`
+— und sag mir, dass ich die Datei nach dem Öffnen löschen soll.
 
 **Ohne Relay** (oder zum Arbeiten am Mac ohne Internet) startest du den lokalen
 Server:

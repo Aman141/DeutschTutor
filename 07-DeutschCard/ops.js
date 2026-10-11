@@ -16,13 +16,19 @@ const OP_FIELDS = {
   fehlerTags: [], source: '', added: null,
 };
 
-const clone = v => (v === null || typeof v !== 'object') ? v : JSON.parse(JSON.stringify(v));
+// Ids, timestamps and card ids are printable ASCII, so JS (UTF-16 units) and
+// Python (code points) sort them identically. Anything else is not an op.
+const PRINTABLE = /^[\x21-\x7e]+$/;
+const MAX_MISTAKES = 1000;
+
+const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const hasField = k => Object.prototype.hasOwnProperty.call(OP_FIELDS, k);
 
 function validOp(o) {
-  return !!o && typeof o === 'object' &&
-    typeof o.id === 'string' && o.id !== '' &&
-    typeof o.at === 'string' &&
-    typeof o.card === 'string' && o.card !== '' &&
+  return isObject(o) &&
+    typeof o.id === 'string' && o.id.length <= 64 && PRINTABLE.test(o.id) &&
+    typeof o.at === 'string' && o.at.length <= 40 && PRINTABLE.test(o.at) &&
+    typeof o.card === 'string' && o.card.length <= 64 && PRINTABLE.test(o.card) &&
     typeof o.op === 'string';
 }
 
@@ -33,12 +39,26 @@ function compareOps(a, b) {
   return 0;
 }
 
+// Every field gets the type its default has, whatever an op carried. The log is
+// shared by all devices, so one garbled op must not crash or split them: a
+// wrong type falls back to the default, numbers are clamped integers.
+function coerce(k, v) {
+  const def = OP_FIELDS[k];
+  if (Array.isArray(def)) return Array.isArray(v) ? v.filter(x => typeof x === 'string') : [];
+  if (typeof def === 'boolean') return v === true;
+  if (typeof def === 'string') return typeof v === 'string' ? v : def;
+  if (typeof def === 'number') {
+    if (!Number.isInteger(v)) return 0;
+    return k === 'difficulty' ? Math.min(3, Math.max(0, v)) : Math.min(MAX_MISTAKES, Math.max(0, v));
+  }
+  return typeof v === 'string' ? v : null;      // lastSeen, added
+}
+
+const str = v => (typeof v === 'string' && v !== '') ? v : null;
+
 function cardFrom(data, op) {
   const out = {};
-  for (const [k, def] of Object.entries(OP_FIELDS)) {
-    const v = data[k];
-    out[k] = clone(v === undefined || v === null ? def : v);
-  }
+  for (const k of Object.keys(OP_FIELDS)) out[k] = coerce(k, data[k]);
   out.id = op.card;
   out.added = out.added || op.at.slice(0, 10);
   return out;
@@ -51,9 +71,10 @@ function newState() {
 function applyOp(state, o) {
   const { cards, order, deleted } = state;
   const cid = o.card;
+  const data = isObject(o.data) ? o.data : {};
   if (o.op === 'add') {
     if (!cards.has(cid) && !deleted.has(cid)) {
-      cards.set(cid, cardFrom(o.data || {}, o));
+      cards.set(cid, cardFrom(data, o));
       order.push(cid);
     }
     return;
@@ -61,26 +82,25 @@ function applyOp(state, o) {
   const w = cards.get(cid);
   if (!w) return;
   if (o.op === 'edit') {
-    for (const [k, v] of Object.entries(o.data || {})) {
-      if (k in OP_FIELDS && k !== 'id') w[k] = clone(v);
+    for (const [k, v] of Object.entries(data)) {
+      if (hasField(k) && k !== 'id') w[k] = coerce(k, v);
     }
   } else if (o.op === 'delete') {
     cards.delete(cid);
     order.splice(order.indexOf(cid), 1);
     deleted.add(cid);
   } else if (o.op === 'review') {
-    w.known = !!o.known;
-    const d = w.difficulty || 0;
-    w.difficulty = w.known ? Math.max(0, d - 1) : Math.min(3, d + 1);
-    w.lastSeen = o.date || o.at.slice(0, 10);
+    w.known = o.known === true;
+    w.difficulty = w.known ? Math.max(0, w.difficulty - 1) : Math.min(3, w.difficulty + 1);
+    w.lastSeen = str(o.date) || o.at.slice(0, 10);
   } else if (o.op === 'fail') {
-    w.mistakes = (w.mistakes || 0) + 1;
+    w.mistakes = Math.min(MAX_MISTAKES, w.mistakes + 1);
     w.known = false;
     w.difficulty = 3;
-    w.lastSeen = o.date || o.at.slice(0, 10);
-    if (o.kind && !w.mistakeKinds.includes(o.kind)) w.mistakeKinds.push(o.kind);
-    if (o.tag && !w.fehlerTags.includes(o.tag)) w.fehlerTags.push(o.tag);
-    if (o.source) w.source = o.source;
+    w.lastSeen = str(o.date) || o.at.slice(0, 10);
+    if (str(o.kind) && !w.mistakeKinds.includes(o.kind)) w.mistakeKinds.push(o.kind);
+    if (str(o.tag) && !w.fehlerTags.includes(o.tag)) w.fehlerTags.push(o.tag);
+    if (str(o.source)) w.source = o.source;
   }
   // unknown op types are skipped: an older client must not choke on a newer log
 }

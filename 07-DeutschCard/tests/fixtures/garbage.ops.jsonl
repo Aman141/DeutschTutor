@@ -1,0 +1,17 @@
+{"id":"g01","at":"2026-10-01T00:00:00.000Z","op":"add","card":"c-str","data":"x"}
+{"id":"g02","at":"2026-10-01T00:00:00.001Z","op":"add","card":"c-num","data":{"german":"Zahl","difficulty":"1","mistakes":"2","known":"true","tags":["A1",5,null,{"x":1}],"mistakeKinds":null,"lastSeen":7,"added":false,"gender":["der"]}}
+{"id":"g03","at":"2026-10-02T00:00:00.000Z","op":"review","card":"c-num","known":false}
+{"id":"g04","at":"2026-10-02T00:00:00.001Z","op":"edit","card":"c-num","data":["q"]}
+{"id":"g05","at":"2026-10-02T00:00:00.002Z","op":"edit","card":"c-num","data":{"mistakeKinds":null,"constructor":"x","__proto__":{"german":"hacked"},"toString":1,"english":12}}
+{"id":"g06","at":"2026-10-03T00:00:00.000Z","op":"fail","card":"c-num","kind":7,"tag":["#genus"],"source":"","date":5}
+{"id":"g07","at":"2026-10-03T00:00:00.001Z","op":"review","card":"c-num","known":[]}
+{"id":"g08","at":"2026-10-03T00:00:00.002Z","op":"review","card":"c-num","known":"true","date":""}
+{"id":"g09","at":"2026-10-01T00:00:00.002Z","op":"add","card":"c-clamp","data":{"german":"Klemme","difficulty":7,"mistakes":1e300}}
+{"id":"g10","at":"2026-10-01T00:00:00.003Z","op":"add","card":"c-float","data":{"german":"Komma","difficulty":2.0,"mistakes":1.5}}
+{"id":"g11","at":"2026-10-01T00:00:00.004Z","op":"add","card":"c-neg","data":{"german":"Minus","difficulty":-2,"mistakes":-4}}
+{"id":"g12","at":"2026-10-04T00:00:00.000Z","op":"fail","card":"c-clamp","kind":"artikel"}
+{"id":"g13","at":"2026-10-01T00:00:00.000Z￿","op":"add","card":"c-uni","data":{"german":"never: non-ASCII at"}}
+{"id":"g😀","at":"2026-10-01T00:00:00.000Z","op":"add","card":"c-uni","data":{"german":"never: non-ASCII id"}}
+{"id":"g14","at":"2026-10-01T00:00:00.000Z","op":"add","card":"c ws","data":{"german":"never: space in card id"}}
+{"id":"g15","at":"2026-10-01T00:00:00.000Z","op":"add","card":"c-long-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","data":{"german":"never: card id > 64"}}
+{"id":"g16","at":"2026-10-05T00:00:00.000Z","op":"edit","card":"c-float","data":{"tags":"A1","known":1,"difficulty":true}}

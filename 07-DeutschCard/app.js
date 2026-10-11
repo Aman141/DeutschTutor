@@ -17,6 +17,8 @@ let db = null;              // IndexedDB handle; null = memory only (still works
 let device = 'web';
 let token = null;           // Cloudflare relay device token; serve.py needs none
 let cursor = 0;             // ops already pulled from the server
+let epoch = null;           // id of the server log's first op — changes if the log is replaced
+let studyCardGone = false;  // the card on screen was deleted on another device
 let opLog = [];             // every op this device knows, any order
 let knownOpIds = new Set();
 let outbox = new Set();     // ids of our ops the server has not accepted yet
@@ -36,12 +38,14 @@ function idbRequest(req) {
 }
 
 // Fire-and-forget write; the in-memory log is already updated, so a failed
-// write only costs durability, never the current session.
-function idbWrite(store, fn) {
+// write only costs durability, never the current session. Writes that belong
+// together share one transaction (an op and its outbox entry; received ops and
+// the cursor past them), so a crash or full disk cannot keep one without the other.
+function idbWrite(stores, fn) {
   if (!db) return;
   try {
-    const tx = db.transaction(store, 'readwrite');
-    fn(tx.objectStore(store));
+    const tx = db.transaction(stores, 'readwrite');
+    fn(name => tx.objectStore(name));
     tx.onerror = () => console.error('IndexedDB write failed', tx.error);
   } catch (e) { console.error('IndexedDB write failed', e); }
 }
@@ -56,19 +60,21 @@ async function openStore() {
     };
     db = await idbRequest(req);
     const tx = db.transaction(['ops', 'outbox', 'meta'], 'readonly');
-    const [ops, out, dev, cur, tok] = await Promise.all([
+    const [ops, out, dev, cur, tok, ep] = await Promise.all([
       idbRequest(tx.objectStore('ops').getAll()),
       idbRequest(tx.objectStore('outbox').getAll()),
       idbRequest(tx.objectStore('meta').get('device')),
       idbRequest(tx.objectStore('meta').get('cursor')),
       idbRequest(tx.objectStore('meta').get('token')),
+      idbRequest(tx.objectStore('meta').get('epoch')),
     ]);
     opLog = ops;
     outbox = new Set(out.map(x => x.id));
     cursor = cur || 0;
     token = tok || null;
+    epoch = ep || null;
     device = dev || 'web-' + Math.random().toString(36).slice(2, 8);
-    if (!dev) idbWrite('meta', s => s.put(device, 'device'));
+    if (!dev) idbWrite('meta', st => st('meta').put(device, 'device'));
   } catch (e) {
     console.error('IndexedDB unavailable, changes last only this session', e);
     db = null;
@@ -84,11 +90,8 @@ function readSetupLink() {
   const params = new URLSearchParams(location.hash.slice(1));
   if (!params.get('token')) return false;
   token = params.get('token');
-  idbWrite('meta', s => s.put(token, 'token'));
-  if (params.get('device')) {
-    device = params.get('device');
-    idbWrite('meta', s => s.put(device, 'device'));
-  }
+  if (params.get('device')) device = params.get('device');
+  idbWrite('meta', st => { st('meta').put(token, 'token'); st('meta').put(device, 'device'); });
   history.replaceState(null, '', location.pathname + location.search);
   return true;
 }
@@ -98,11 +101,19 @@ function apiHeaders(extra = {}) {
 }
 
 function rebuild() {
+  const onScreen = studyQueue[studyIndex] && studyQueue[studyIndex].id;
   opState = replay(opLog);
   lastOp = opLog.filter(validOp).sort(compareOps).pop() || null;
   words = deckOf(opState);
   // the study queue holds card objects; point it at the freshly built ones
   studyQueue = studyQueue.map(w => opState.cards.get(w.id)).filter(Boolean);
+  // Cards deleted elsewhere shift the queue: keep the index on the card that is
+  // on screen, or Known would be logged for its neighbour.
+  if (onScreen) {
+    const i = studyQueue.findIndex(w => w.id === onScreen);
+    if (i !== -1) studyIndex = i;
+    else { studyIndex = Math.min(studyIndex, studyQueue.length); studyCardGone = true; }
+  }
 }
 
 function todayLocal() {
@@ -117,6 +128,7 @@ function newOpId() {
 // would vanish on the next replay and never reach the vault.
 function emit(op, card, payload = {}) {
   const o = { id: newOpId(), at: new Date().toISOString(), device, op, card, ...payload };
+  if (!validOp(o)) { console.error('Refusing invalid op', o); return; }
   opLog.push(o);
   knownOpIds.add(o.id);
   outbox.add(o.id);
@@ -127,18 +139,24 @@ function emit(op, card, payload = {}) {
   } else {
     rebuild();                    // clock went backwards — replay from scratch
   }
-  idbWrite('ops', s => s.put(o));
-  idbWrite('outbox', s => s.put({ id: o.id }));
+  idbWrite(['ops', 'outbox'], st => { st('ops').put(o); st('outbox').put({ id: o.id }); });
   scheduleSync(400);              // coalesce a run of card marks into one push
   updateSyncBadge();
 }
 
-function receive(ops) {
+// New ops and the cursor past them are stored together: a cursor saved without
+// its ops would skip those ops forever.
+function receive(ops, newCursor, newEpoch) {
   const fresh = ops.filter(o => validOp(o) && !knownOpIds.has(o.id));
-  if (!fresh.length) return 0;
   fresh.forEach(o => { opLog.push(o); knownOpIds.add(o.id); });
-  idbWrite('ops', s => fresh.forEach(o => s.put(o)));
-  rebuild();
+  cursor = newCursor;
+  epoch = newEpoch;
+  idbWrite(['ops', 'meta'], st => {
+    fresh.forEach(o => st('ops').put(o));
+    st('meta').put(cursor, 'cursor');
+    st('meta').put(epoch, 'epoch');
+  });
+  if (fresh.length) rebuild();
   return fresh.length;
 }
 
@@ -165,20 +183,33 @@ async function sync() {
       });
       const out = await res.json().catch(() => ({}));
       if (!res.ok) throw httpError(res, out);
+      // only an explicit ok counts: a captive portal also answers 200
+      if (out.ok !== true) throw new Error('Server hat die Änderungen nicht bestätigt');
       chunk.forEach(o => outbox.delete(o.id));
-      idbWrite('outbox', s => chunk.forEach(o => s.delete(o.id)));
+      idbWrite('outbox', st => chunk.forEach(o => st('outbox').delete(o.id)));
     }
     // pull: everything after our cursor, including what we just pushed; a fresh
     // device on a long log takes several pages
-    let more = true;
+    let more = true, since = cursor, restarted = false;
     while (more) {
-      const res = await fetch(`${API}?since=${cursor}`, { cache: 'no-store', headers: apiHeaders() });
+      const res = await fetch(`${API}?since=${since}`, { cache: 'no-store', headers: apiHeaders() });
       const out = await res.json().catch(() => ({}));
       if (!res.ok) throw httpError(res, out);
-      changed += receive(out.ops || []);
-      cursor = out.seq;
-      more = !!out.more;
-      idbWrite('meta', s => s.put(cursor, 'cursor'));
+      if (!Array.isArray(out.ops) || !Number.isInteger(out.seq)) throw new Error('Unerwartete Antwort vom Server');
+      // A different epoch (or reset) means the server's log was replaced: our
+      // cursor is meaningless and it may lack ops we pushed long ago. Pull from
+      // the start and offer it everything we hold.
+      const epochChanged = epoch && out.epoch && out.epoch !== epoch;
+      if ((out.reset || epochChanged) && !restarted) {
+        restarted = true;
+        opLog.forEach(o => outbox.add(o.id));
+        idbWrite('outbox', st => opLog.forEach(o => st('outbox').put({ id: o.id })));
+        syncAgain = true;
+        if (epochChanged) { since = 0; continue; }
+      }
+      changed += receive(out.ops, out.seq, out.epoch ?? null);
+      since = out.seq;
+      more = out.more === true;
     }
     serverReachable = true;
     needsSetup = false;
@@ -234,6 +265,14 @@ function updateSyncBadge(error) {
   el.title = detail;
 }
 
+// Card fields arrive from other devices through the relay, so they are data, not
+// markup: everything interpolated into innerHTML goes through esc().
+const GENDERS = new Set(['der', 'die', 'das']);
+const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ESC[c]);
+}
+
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
@@ -254,16 +293,23 @@ let activeFilters = { tag: 'all', level: 'all' };
 // would mint a second set of seed cards that merge into the vault as duplicates.
 async function firstRun() {
   let legacy = [];
-  try {
-    legacy = JSON.parse(localStorage.getItem(LEGACY_KEY)) || [];
-    if (db) localStorage.removeItem(LEGACY_KEY);   // without IndexedDB it is still the only copy
-  } catch {}
-  if (opLog.length) return;
+  try { legacy = JSON.parse(localStorage.getItem(LEGACY_KEY)) || []; } catch {}
+  if (!Array.isArray(legacy)) legacy = [];
   if (legacy.length) {
-    // the old browser cache: same card ids as the vault, so adds of cards the
-    // vault already has are no-ops when they meet
-    legacy.forEach(w => w && w.id && w.german && emit('add', w.id, { data: w }));
-  } else if (location.protocol === 'file:') {
+    // The pre-op-log browser deck. Cards the vault lacks are added. For cards it
+    // has, the browser's study state is carried over only where the browser saw
+    // the card more recently — an old cache must not undo newer progress.
+    for (const w of legacy) {
+      if (!w || typeof w.id !== 'string' || !w.german) continue;
+      const cur = opState.cards.get(w.id);
+      if (!cur) {
+        if (!opState.deleted.has(w.id)) emit('add', w.id, { data: w });
+      } else if (typeof w.lastSeen === 'string' && w.lastSeen > (cur.lastSeen || '')) {
+        emit('edit', w.id, { data: { known: w.known === true, difficulty: w.difficulty, lastSeen: w.lastSeen } });
+      }
+    }
+    if (db) { try { localStorage.removeItem(LEGACY_KEY); } catch {} }   // else still the only copy
+  } else if (!opLog.length && location.protocol === 'file:') {
     try {
       const seed = await (await fetch('data/seed.json')).json();
       seed.forEach(w => emit('add', generateId(), { data: w }));
@@ -551,23 +597,26 @@ function renderWordList() {
     return;
   }
 
-  list.innerHTML = filtered.map(w => `
-    <div class="word-item" data-id="${w.id}">
-      <span class="word-gender-badge ${w.gender || 'none'}">${w.gender || '—'}</span>
+  list.innerHTML = filtered.map(w => {
+    const gender = GENDERS.has(w.gender) ? w.gender : '';
+    return `
+    <div class="word-item" data-id="${esc(w.id)}">
+      <span class="word-gender-badge ${gender || 'none'}">${gender || '—'}</span>
       <div class="word-main">
-        <div class="word-german">${w.german}${w.plural ? ' · ' + w.plural : ''}</div>
-        <div class="word-english">${w.english}</div>
+        <div class="word-german">${esc(w.german)}${w.plural ? ' · ' + esc(w.plural) : ''}</div>
+        <div class="word-english">${esc(w.english)}</div>
       </div>
       <div class="word-tags">
-        ${(w.tags || []).map(t => `<span class="tag-pill">${t}</span>`).join('')}
+        ${(w.tags || []).map(t => `<span class="tag-pill">${esc(t)}</span>`).join('')}
       </div>
       <span class="word-status ${w.known ? 'known' : 'learning'}">${w.known ? 'Known' : 'Learning'}</span>
       <div class="word-actions">
-        <button class="btn-icon edit" data-id="${w.id}" title="Edit">✎</button>
-        <button class="btn-icon delete" data-id="${w.id}" title="Delete">✕</button>
+        <button class="btn-icon edit" data-id="${esc(w.id)}" title="Edit">✎</button>
+        <button class="btn-icon delete" data-id="${esc(w.id)}" title="Delete">✕</button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 // ── Modal ────────────────────────────────────────────────────────────────────
@@ -656,7 +705,7 @@ function renderStats() {
     const pct = Math.round((known / group.length) * 100);
     return `
       <div class="stat-card">
-        <h4>${tag}</h4>
+        <h4>${esc(tag)}</h4>
         <div class="stat-bar-wrap">
           <div class="stat-bar" style="width:${pct}%"></div>
         </div>
@@ -692,6 +741,14 @@ function renderAll() {
 function refreshViews() {
   renderHome();
   const active = document.querySelector('.view.active');
+  if (active && active.id === 'view-study') {
+    updateProgress();
+    if (studyCardGone) {                    // the card on screen no longer exists
+      studyCardGone = false;
+      if (studyIndex < studyQueue.length) showCard(studyQueue[studyIndex]);
+      else showSummary();
+    }
+  }
   if (active && active.id === 'view-manage') renderWordList();
   if (active && active.id === 'view-stats') renderStats();
 }
